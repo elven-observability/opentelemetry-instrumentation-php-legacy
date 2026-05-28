@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3 - 2026-05-28
+
+- Reworked README into a copy/paste integration runbook for engineers and coding agents.
+- Added explicit install, environment, NGINX/PHP-FPM, route, outbound propagation, DB, logs, metrics, validation, rollout, and troubleshooting steps.
+
 ## 0.1.2 - 2026-05-28
 
 - Clarified public GitHub VCS installation while Packagist registration is pending.

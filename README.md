@@ -1,43 +1,71 @@
 # Elven OpenTelemetry Instrumentation PHP Legacy
 
-OpenTelemetry-compatible traces, metrics, and log correlation for legacy PHP apps.
+Production-oriented OpenTelemetry-compatible traces, metrics, and log correlation for legacy PHP applications.
 
-This package is built for PHP applications that cannot safely use the official OpenTelemetry PHP SDK or PECL extension yet. It supports `php >=7.3.13`, exports OTLP HTTP/JSON directly to an OpenTelemetry Collector, and never lets telemetry failures break the application.
+This library is for PHP apps that cannot safely use the official OpenTelemetry PHP SDK or the PECL `opentelemetry` extension yet. It supports `php >=7.3.13`, exports OTLP HTTP/JSON directly to an OpenTelemetry Collector, propagates W3C trace context, and never lets telemetry failures break the application.
 
-## What You Get By Default
+## What This Library Does
 
-- Traces exported to `http://localhost:4318/v1/traces`.
-- Metrics exported to `http://localhost:4318/v1/metrics`.
-- W3C `traceparent` and `tracestate` extraction/injection.
-- W3C `baggage` extraction/injection with sensitive-key filtering.
-- Parent-based sampling with ratio `1`.
-- Request-local span limit of `128`.
-- Export timeout of `200ms`.
-- Monolog 1 log correlation enabled.
-- OTLP logs export disabled; logs stay in your existing pipeline.
-- Payload, XML/body, raw user id, cookies, tokens, passwords, Authorization, and raw SQL capture disabled.
-- DB spans include `db.query.summary` by default. Raw `db.statement` is redacted unless you explicitly opt in.
+- Creates PHP internal spans for legacy/custom apps.
+- Continues upstream traces through W3C `traceparent`, `tracestate`, and `baggage`.
+- Injects trace headers into outbound HTTP, cURL, Guzzle, SOAP/WCF, and custom wrappers.
+- Exports traces to `/v1/traces` and metrics to `/v1/metrics` over OTLP HTTP/JSON.
+- Adds `trace_id` and `span_id` to Monolog 1 or custom log contexts.
+- Emits low-cardinality request, dependency, exporter, and business metrics.
+- Redacts sensitive attributes by default.
+- Drops excessive spans and metric points per request instead of growing unbounded memory.
+- Keeps logs in the existing logging pipeline. OTLP log export is intentionally out of scope.
+
+## Safe Defaults
+
+Default behavior is intentionally conservative:
+
+- `ELVEN_OTEL_ENABLED=true`.
+- OTLP endpoint base: `http://localhost:4318`.
+- Protocol: `http/json`.
+- Export timeout: `200ms`.
+- Sampler: `parentbased_traceidratio` with ratio `1`.
+- Max spans per request: `128`.
+- Max metric points per request: `512`.
+- Monolog/custom log correlation: enabled.
+- Payload, body, XML, cookies, tokens, passwords, Authorization, raw user id, and raw SQL capture: disabled.
+- DB spans include `db.query.summary`; raw `db.statement` is redacted unless explicitly enabled.
+
+Set this at any time to turn the whole library into no-op:
+
+```bash
+ELVEN_OTEL_ENABLED=false
+```
+
+The kill switch wins even if application code calls `Observability::init(array('enabled' => true))`.
+
+## Requirements
+
+- PHP `>=7.3.13`.
+- Composer.
+- `ext-json`.
+- An OpenTelemetry Collector reachable by the PHP app.
+
+Optional integrations:
+
+- `ext-curl` for lower-overhead OTLP export and cURL examples.
+- `ext-soap` for SOAP/WCF examples.
+- `guzzlehttp/guzzle` for Guzzle middleware.
+- `monolog/monolog` for Monolog 1 log correlation.
+- `slim/slim` for Slim 2 examples.
 
 ## Install
 
-### Packagist
+### Current Public GitHub Install
 
-After the package is registered on Packagist:
-
-```bash
-composer require elven-observability/opentelemetry-instrumentation-php-legacy
-```
-
-### Public GitHub VCS
-
-This works immediately while Packagist registration is pending and does not require a GitHub token because the repository is public:
+Use this while Packagist registration is pending. No GitHub token is required because the repository is public.
 
 ```bash
 composer config repositories.elven-php-legacy vcs https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy
 composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.1
 ```
 
-For committed application configuration:
+For application repos, commit this in `composer.json`:
 
 ```json
 {
@@ -53,113 +81,188 @@ For committed application configuration:
 }
 ```
 
-Remove the `repositories` block after the package is available on Packagist.
+For apps pinned to PHP `7.3.13`, keep the app's existing Composer platform:
 
-The library requires only PHP and `ext-json`. cURL, SOAP, Guzzle, Slim 2, and Monolog are optional integrations.
+```json
+{
+  "config": {
+    "platform": {
+      "php": "7.3.13"
+    }
+  }
+}
+```
 
-## 5 Minute Setup
+### Future Packagist Install
 
-Set the service identity and point the app at an OpenTelemetry Collector:
+After the package is registered on Packagist, the app can use only:
+
+```bash
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.1
+```
+
+Then remove the temporary `repositories` block from `composer.json`.
+
+## Step 1: Configure Environment
+
+Start in staging. Replace the service values and Collector host.
 
 ```bash
 ELVEN_OTEL_ENABLED=true
+
 OTEL_SERVICE_NAME=legacy-booking-api
 OTEL_SERVICE_NAMESPACE=booking
+OTEL_SERVICE_VERSION=1.0.0
 ELVEN_ENVIRONMENT=staging
+
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http/json
+OTEL_EXPORTER_OTLP_TIMEOUT=200
+ELVEN_OTEL_EXPORT_TIMEOUT_MS=200
+
+OTEL_PROPAGATORS=tracecontext,baggage
+OTEL_TRACES_EXPORTER=otlp
+OTEL_TRACES_SAMPLER=parentbased_traceidratio
+OTEL_TRACES_SAMPLER_ARG=1
+
+OTEL_METRICS_EXPORTER=otlp
+OTEL_LOGS_EXPORTER=none
+ELVEN_OTEL_LOG_CORRELATION_ENABLED=true
+
+ELVEN_OTEL_CAPTURE_DB_STATEMENT=false
+ELVEN_OTEL_REDACT_DB_STATEMENT=true
+ELVEN_OTEL_ALLOW_RAW_ATTRIBUTES=
+
+ELVEN_OTEL_MAX_SPANS_PER_REQUEST=128
+ELVEN_OTEL_MAX_METRIC_POINTS_PER_REQUEST=512
+ELVEN_OTEL_DEBUG=false
 ```
 
-Then initialize once near the start of the request, usually right after Composer autoload:
+The PHP app does not need an Elven token when it sends telemetry to a customer-owned or local Collector. Backend credentials belong in the Collector config.
+
+## Step 2: Forward Trace Headers Through NGINX/PHP-FPM
+
+If NGINX forwards requests to PHP-FPM, preserve incoming W3C trace context:
+
+```nginx
+fastcgi_param HTTP_TRACEPARENT $http_traceparent;
+fastcgi_param HTTP_TRACESTATE  $http_tracestate;
+fastcgi_param HTTP_BAGGAGE     $http_baggage;
+```
+
+Without these params, PHP starts a new trace instead of continuing the upstream trace.
+
+## Step 3: Initialize Once Per Request
+
+Initialize near the start of the request, usually right after Composer autoload/bootstrap.
 
 ```php
 <?php
 
 use Elven\Observability\PhpLegacy\Observability;
 
-require_once __DIR__ . '/vendor/autoload.php';
+require_once __DIR__ . '/../vendor/autoload.php';
 
-$handle = Observability::init();
+$otelHandle = Observability::init();
 
-register_shutdown_function(function () use ($handle) {
-    $handle->shutdown();
+register_shutdown_function(function () use ($otelHandle) {
+    $otelHandle->shutdown();
 });
 ```
 
-That is enough for manual spans, metrics, propagation helpers, and log correlation. The app does not need an Elven token when it sends telemetry to a local or customer-owned Collector; backend credentials belong in the Collector config.
+`shutdown()` is idempotent and exception-safe. It flushes request-local spans and metrics without throwing into application code.
 
-## Manual Spans
+## Step 4: Wrap The Main HTTP Route
+
+For Slim 2 or custom front controllers, wrap the central route/controller invocation. Use a stable route name. Never put request ids, order ids, user ids, tokens, CPF, email, or trace ids in span names or metric labels.
 
 ```php
-use Elven\Observability\PhpLegacy\Observability;
+use Elven\Observability\PhpLegacy\Bridge\Legacy\RestRouteInstrumentation;
 
-Observability::tracer()->withSpan('ticket.search', function ($span) {
-    $span->setAttribute('operation', 'ticket_search');
-    $span->setAttribute('product', 'air');
-
-    // Run the real work here.
-});
+$result = RestRouteInstrumentation::traceRestAction(
+    $version,
+    $controller,
+    $action,
+    function ($span) use ($serviceObject, $method, $requestData, $controller, $action) {
+        $span->setAttribute('operation', strtolower($controller . '.' . $action));
+        return $serviceObject->$method($requestData);
+    }
+);
 ```
 
-Exceptions are recorded as sanitized exception events and the span status becomes `ERROR`.
-
-## HTTP Server Span
-
-For Slim 2 or custom routing, wrap the route handler with a stable route name. Do not use request ids, order ids, user ids, tokens, CPF, email, or trace ids as route names or metric labels.
+For non-REST routing, use the lower-level helper:
 
 ```php
 use Elven\Observability\PhpLegacy\Instrumentation\HttpServerInstrumentation;
 
-$route = sprintf(
-    '%s /rest/v%s/%s/%s',
-    $_SERVER['REQUEST_METHOD'],
-    $version,
-    $controller,
-    $action
-);
+$route = 'POST /api/v1/tickets/search';
 
-$result = HttpServerInstrumentation::instrument($route, function () use ($serviceObject, $method, $requestData) {
-    return $serviceObject->$method($requestData);
+$result = HttpServerInstrumentation::instrument($route, function ($span) use ($handler, $request) {
+    $span->setAttribute('operation', 'ticket_search');
+    return $handler->handle($request);
 });
 ```
 
-The span extracts upstream `traceparent`/`tracestate` from `$_SERVER`, names the operation with the stable route, records HTTP status, and emits `http.server.request.duration`.
+Server spans automatically include safe HTTP attributes such as method, route, sanitized path, server address, response status, service name, environment, and host name.
 
-## Outbound HTTP Propagation
+## Step 5: Propagate Context To Outbound HTTP
 
-Use the header helpers inside the client span so the downstream request receives the correct child context.
+Create the client span before sending the request. The callback receives headers that already contain the child `traceparent`.
 
 ```php
 use Elven\Observability\PhpLegacy\Instrumentation\HeaderInjector;
 use Elven\Observability\PhpLegacy\Instrumentation\HttpClientInstrumentation;
 
-$response = HttpClientInstrumentation::instrument(
-    'POST',
-    'https://dsg.example.test/booking',
-    function ($span, array $headers) {
-        // Pass $headers to cURL, Guzzle, SOAP/WCF, or your internal wrapper.
-        // Example cURL format:
-        // curl_setopt($ch, CURLOPT_HTTPHEADER, HeaderInjector::toHeaderLines($headers));
-    }
-);
+$response = HttpClientInstrumentation::instrument('POST', $url, function ($span, array $headers) use ($ch) {
+    curl_setopt($ch, CURLOPT_HTTPHEADER, HeaderInjector::toHeaderLines($headers));
+
+    $body = curl_exec($ch);
+    $statusCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+    return array(
+        'status_code' => $statusCode,
+        'body' => $body,
+    );
+});
 ```
 
-The Guzzle integration is a normal middleware:
+Do not attach request or response bodies to spans.
+
+For Guzzle:
 
 ```php
 use Elven\Observability\PhpLegacy\Instrumentation\GuzzleInstrumentation;
+use GuzzleHttp\Client;
 use GuzzleHttp\HandlerStack;
 
 $stack = HandlerStack::create();
 $stack->push(GuzzleInstrumentation::middleware());
+
+$client = new Client(array('handler' => $stack));
 ```
 
-## DB Spans And SQL Statements
+For SOAP/WCF/custom XML transports:
 
-By default, DB spans are useful but privacy-safe:
+```php
+use Elven\Observability\PhpLegacy\Instrumentation\SoapInstrumentation;
 
-- `db.system`, `db.name`, `db.operation.name`.
-- `db.query.summary`, for example `SELECT users`.
-- `db.statement` is present only as redacted telemetry unless you opt in.
+$response = SoapInstrumentation::instrument(
+    'BookingService',
+    $action,
+    $serverAddress,
+    $timeout,
+    function ($span) use ($client, $request) {
+        $headers = SoapInstrumentation::injectHttpHeaders(array(), $span);
+        return $client->execute($request, $headers);
+    }
+);
+```
+
+SOAP/XML payload capture is off by default.
+
+## Step 6: Wrap DB Calls Safely
+
+Use `DbInstrumentation::traceQuery()` around PDO, mysqli, Medoo, or custom DB wrapper calls.
 
 ```php
 use Elven\Observability\PhpLegacy\Instrumentation\DbInstrumentation;
@@ -168,33 +271,35 @@ $rows = DbInstrumentation::traceQuery(
     'mysql',
     'select',
     'booking',
-    function () use ($pdo) {
-        return $pdo->query('select * from tickets where email = "person@example.test"');
+    function () use ($pdo, $sql) {
+        return $pdo->query($sql);
     },
-    'select * from tickets where email = "person@example.test"'
+    $sql
 );
 ```
 
-To capture sanitized SQL text during a controlled investigation:
+Default DB telemetry:
+
+- `db.system`
+- `db.name`
+- `db.operation.name`
+- `db.query.summary`, for example `SELECT tickets`
+- redacted `db.statement`
+
+For controlled troubleshooting with sanitized SQL:
 
 ```bash
 ELVEN_OTEL_CAPTURE_DB_STATEMENT=true
 ELVEN_OTEL_REDACT_DB_STATEMENT=true
 ```
 
-Do not set `ELVEN_OTEL_REDACT_DB_STATEMENT=false` in production unless a written privacy exception exists.
+Do not use this in production without explicit written approval:
 
-## Business Metrics
-
-```php
-Observability::metrics()->counter('booking.ticket.search.started')->add(1, array(
-    'operation' => 'ticket_search',
-));
+```bash
+ELVEN_OTEL_REDACT_DB_STATEMENT=false
 ```
 
-Only low-cardinality labels are exported: `service_name`, `service_namespace`, `environment`, `route`, `method`, `status_code`, `dependency_type`, `dependency_name`, `operation`, and `error_type`.
-
-## Log Correlation
+## Step 7: Add Log Correlation
 
 For Monolog 1:
 
@@ -207,49 +312,53 @@ $logger->pushProcessor(new MonologTraceProcessor());
 For custom log wrappers:
 
 ```php
+use Elven\Observability\PhpLegacy\Observability;
+
 $context = Observability::logs()->correlate($context);
+$logger->info('ticket search started', $context);
 ```
 
-Every correlated log receives `trace_id`, `span_id`, `trace_flags`, `service_name`, `environment`, and `hostname`. Logs are not exported by this library.
+Every correlated log receives:
 
-## Important Environment Variables
+- `trace_id`
+- `span_id`
+- `trace_flags`
+- `service_name`
+- `environment`
+- `hostname`
 
-```bash
-ELVEN_OTEL_ENABLED=true
-OTEL_SERVICE_NAME=legacy-booking-api
-OTEL_SERVICE_NAMESPACE=booking
-OTEL_SERVICE_VERSION=1.0.0
-ELVEN_ENVIRONMENT=staging
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http/json
-OTEL_PROPAGATORS=tracecontext,baggage
-OTEL_TRACES_SAMPLER=parentbased_traceidratio
-OTEL_TRACES_SAMPLER_ARG=1
-OTEL_METRICS_EXPORTER=otlp
-OTEL_LOGS_EXPORTER=none
-ELVEN_OTEL_LOG_CORRELATION_ENABLED=true
-ELVEN_OTEL_CAPTURE_DB_STATEMENT=false
-ELVEN_OTEL_REDACT_DB_STATEMENT=true
-ELVEN_OTEL_MAX_SPANS_PER_REQUEST=128
-ELVEN_OTEL_MAX_METRIC_POINTS_PER_REQUEST=512
-ELVEN_OTEL_EXPORT_TIMEOUT_MS=200
+Logs are not exported by this library. They continue through the existing log pipeline.
+
+## Step 8: Add Business Metrics
+
+Use stable metric names and low-cardinality labels.
+
+```php
+use Elven\Observability\PhpLegacy\Observability;
+
+Observability::metrics()->counter('booking.ticket.search.started')->add(1, array(
+    'operation' => 'ticket_search',
+));
 ```
 
-Set `ELVEN_OTEL_ENABLED=false` for the total kill switch. It wins even if code calls `Observability::init(array('enabled' => true))`.
+Allowed metric labels:
 
-## NGINX And PHP-FPM Context Forwarding
+- `service_name`
+- `service_namespace`
+- `environment`
+- `route`
+- `method`
+- `status_code`
+- `dependency_type`
+- `dependency_name`
+- `operation`
+- `error_type`
 
-If NGINX terminates the request before PHP-FPM, forward trace headers:
+Never use request id, order id, user id, token, CPF, email, trace id, full URL, SQL statement, or object key as a metric label.
 
-```nginx
-fastcgi_param HTTP_TRACEPARENT $http_traceparent;
-fastcgi_param HTTP_TRACESTATE  $http_tracestate;
-fastcgi_param HTTP_BAGGAGE     $http_baggage;
-```
+## Step 9: Validate Locally
 
-## Local Validation
-
-This host does not need local PHP or Composer. Use Docker:
+This repository includes Docker-based validation, so the host does not need local PHP or Composer.
 
 ```bash
 docker compose run --rm php73 composer validate --strict
@@ -263,22 +372,91 @@ Run the fake Collector:
 docker compose up fake-collector
 ```
 
-Then point an example or app at:
+Point the app or examples at it:
 
 ```bash
 OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
 ```
 
+Expected fake Collector paths:
+
+- `/v1/traces`
+- `/v1/metrics`
+
+## Step 10: Validate In Staging
+
+Before canary:
+
+- Composer install works with the app's PHP platform, including `7.3.13`.
+- `ELVEN_OTEL_ENABLED=false` makes telemetry no-op.
+- Incoming `traceparent` appears as the parent of PHP server spans.
+- Outbound HTTP/SOAP/WCF calls receive child `traceparent` headers.
+- Error responses and exceptions mark spans as `ERROR`.
+- Logs contain `trace_id` and `span_id`.
+- DB spans contain `db.query.summary`.
+- Raw SQL remains redacted unless controlled troubleshooting envs are enabled.
+- Fake JWT, bearer token, cookie, CPF, email, card, and SQL literals are redacted.
+- Tempo receives traces.
+- Mimir/Prometheus receives metrics.
+- Loki logs can be correlated by `trace_id`.
+- The PHP app has no backend/vendor token in its environment.
+
 ## Production Rollout
 
-1. Enable in staging with the target Collector.
-2. Validate traces in Tempo, metrics in Mimir/Prometheus, and correlated logs in Loki.
-3. Canary one PHP-FPM replica or one small instance pool.
-4. Watch error rate, p95 latency, exporter failures, and dropped spans.
+1. Enable in staging.
+2. Canary one PHP-FPM replica or one small instance pool.
+3. Validate Tempo, Mimir/Prometheus, and Loki.
+4. Watch HTTP 5xx, p95/p99 latency, PHP-FPM saturation, `elven.php.exporter.failed_exports`, `elven.php.exporter.dropped_spans`, and `elven.php.exporter.dropped_metric_points`.
 5. Expand gradually.
-6. Do not restart production outside a controlled window.
+6. Keep `ELVEN_OTEL_ENABLED=false` ready.
+7. Do not restart production outside a controlled window.
 
-## Documentation
+## Troubleshooting
+
+No traces:
+
+- Confirm `ELVEN_OTEL_ENABLED=true`.
+- Confirm `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`.
+- Confirm `OTEL_EXPORTER_OTLP_ENDPOINT` reaches the Collector from the PHP container/host.
+- Confirm the Collector accepts `/v1/traces`.
+- Check `elven.php.exporter.failed_exports`.
+
+Trace does not continue upstream:
+
+- Confirm NGINX forwards `HTTP_TRACEPARENT`, `HTTP_TRACESTATE`, and `HTTP_BAGGAGE`.
+- Confirm the header reaches `$_SERVER['HTTP_TRACEPARENT']`.
+- Confirm the PHP server span has the same `trace_id` as the upstream span.
+
+High metric cardinality:
+
+- Remove labels outside the allowlist.
+- Replace dynamic paths with stable routes.
+- Remove ids, emails, CPFs, tokens, trace ids, SQL, and object keys from labels.
+
+Collector unavailable:
+
+- The app should continue normally.
+- Exporter failures are caught.
+- The timeout is short.
+- Circuit breaker reduces repeated attempts.
+- Use `ELVEN_OTEL_ENABLED=false` if telemetry creates operational risk.
+
+## Implementation Checklist For Engineers Or Coding Agents
+
+1. Add the Composer dependency.
+2. Add env vars from Step 1.
+3. Add NGINX/PHP-FPM trace header forwarding if applicable.
+4. Call `Observability::init()` once near request start.
+5. Register `$otelHandle->shutdown()` with `register_shutdown_function()`.
+6. Wrap the central route/controller invocation with a stable server span.
+7. Wrap outbound HTTP, cURL, Guzzle, SOAP/WCF, DB, cache, queue, mail, storage, and search calls where useful.
+8. Add Monolog 1 processor or custom `Observability::logs()->correlate($context)`.
+9. Add only low-cardinality business metrics.
+10. Validate staging before canary.
+
+Do not capture request/response bodies, XML payloads, raw SQL, tokens, cookies, Authorization headers, CPF/email/card values, raw user ids, or dynamic ids in metric labels.
+
+## More Documentation
 
 - `docs/SDD.md`
 - `docs/env-vars.md`
