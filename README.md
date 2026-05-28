@@ -20,9 +20,40 @@ This package is built for PHP applications that cannot safely use the official O
 
 ## Install
 
+### Packagist
+
+After the package is registered on Packagist:
+
 ```bash
 composer require elven-observability/opentelemetry-instrumentation-php-legacy
 ```
+
+### Public GitHub VCS
+
+This works immediately while Packagist registration is pending and does not require a GitHub token because the repository is public:
+
+```bash
+composer config repositories.elven-php-legacy vcs https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.1
+```
+
+For committed application configuration:
+
+```json
+{
+  "repositories": [
+    {
+      "type": "vcs",
+      "url": "https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy"
+    }
+  ],
+  "require": {
+    "elven-observability/opentelemetry-instrumentation-php-legacy": "^0.1"
+  }
+}
+```
+
+Remove the `repositories` block after the package is available on Packagist.
 
 The library requires only PHP and `ext-json`. cURL, SOAP, Guzzle, Slim 2, and Monolog are optional integrations.
 

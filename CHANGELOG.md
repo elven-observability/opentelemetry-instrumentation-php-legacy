@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 - 2026-05-28
+
+- Clarified public GitHub VCS installation while Packagist registration is pending.
+
 ## 0.1.1 - 2026-05-28
 
 - Removed customer-specific public docs, examples, tests, and bridge names.
