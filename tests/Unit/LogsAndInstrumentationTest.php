@@ -7,9 +7,11 @@ use Elven\Observability\PhpLegacy\Instrumentation\DbInstrumentation;
 use Elven\Observability\PhpLegacy\Instrumentation\HeaderInjector;
 use Elven\Observability\PhpLegacy\Instrumentation\HttpClientInstrumentation;
 use Elven\Observability\PhpLegacy\Instrumentation\Slim2Instrumentation;
+use Elven\Observability\PhpLegacy\Logs\MonologOtlpHandler;
 use Elven\Observability\PhpLegacy\Logs\MonologTraceProcessor;
 use Elven\Observability\PhpLegacy\Observability;
 use Elven\Observability\PhpLegacy\Tests\Support\Env;
+use Monolog\Logger;
 use PHPUnit\Framework\TestCase;
 
 final class LogsAndInstrumentationTest extends TestCase
@@ -45,6 +47,41 @@ final class LogsAndInstrumentationTest extends TestCase
             self::assertArrayHasKey('trace_id', $record['extra']);
             self::assertArrayHasKey('span_id', $record['extra']);
         });
+    }
+
+    public function testMonologOtlpHandlerBuffersSanitizedRecord(): void
+    {
+        Env::reset();
+        putenv('OTEL_TRACES_EXPORTER=none');
+        putenv('OTEL_METRICS_EXPORTER=none');
+        putenv('OTEL_LOGS_EXPORTER=otlp');
+        Observability::init(array('service_name' => 'log-export-test'));
+
+        $logger = new Logger('legacy');
+        $logger->pushHandler(new MonologOtlpHandler());
+        $logger->warning('login failed for test@example.com', array('password' => 'secret'));
+
+        $records = $this->drainLogRecords(Observability::logs());
+
+        self::assertCount(1, $records);
+        self::assertSame('WARNING', $records[0]['severityText']);
+        self::assertStringNotContainsString('test@example.com', $records[0]['body']);
+        self::assertSame('[REDACTED]', $records[0]['attributes']['log.context.password']);
+    }
+
+    public function testLogRecordLimitDropsExcessRecords(): void
+    {
+        Env::reset();
+        putenv('OTEL_TRACES_EXPORTER=none');
+        putenv('OTEL_METRICS_EXPORTER=none');
+        putenv('OTEL_LOGS_EXPORTER=otlp');
+        putenv('ELVEN_OTEL_MAX_LOG_RECORDS_PER_REQUEST=1');
+        Observability::init(array('service_name' => 'log-limit-test'));
+
+        self::assertTrue(Observability::logs()->emit('INFO', 'first'));
+        self::assertFalse(Observability::logs()->emit('INFO', 'second'));
+
+        self::assertCount(1, $this->drainLogRecords(Observability::logs()));
     }
 
     public function testCurlHeaderInjectionAddsTraceparent(): void
@@ -148,5 +185,15 @@ final class LogsAndInstrumentationTest extends TestCase
 
         self::assertContains('business.operation.started', $names);
         self::assertContains('elven.php.exporter.dropped_metric_points', $names);
+    }
+
+    private function drainLogRecords($logs): array
+    {
+        $reflection = new \ReflectionClass($logs);
+        $property = $reflection->getProperty('records');
+        $property->setAccessible(true);
+        $records = $property->getValue($logs);
+        $property->setValue($logs, array());
+        return is_array($records) ? $records : array();
     }
 }

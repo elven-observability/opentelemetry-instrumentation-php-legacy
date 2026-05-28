@@ -3,7 +3,7 @@
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET';
 
-if ($method !== 'POST' || !in_array($path, array('/v1/traces', '/v1/metrics'), true)) {
+if ($method !== 'POST' || !in_array($path, array('/v1/traces', '/v1/metrics', '/v1/logs'), true)) {
     http_response_code(404);
     header('Content-Type: application/json');
     echo json_encode(array('error' => 'not_found'));

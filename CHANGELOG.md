@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 - 2026-05-28
+
+- Added OTLP HTTP/JSON logs export to Collector `/v1/logs`, with `OTEL_LOGS_EXPORTER=otlp` and `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`.
+- Added bounded request-local log buffering, log redaction/truncation, dropped-log metrics, and export-failure metrics.
+- Added `Logs\MonologOtlpHandler` for Monolog 1 OTLP log export alongside existing trace correlation.
+- Updated fake collector, tests, examples, and docs for Collector-to-Loki log routing.
+
 ## 0.1.3 - 2026-05-28
 
 - Reworked README into a copy/paste integration runbook for engineers and coding agents.

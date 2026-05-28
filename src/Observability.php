@@ -3,6 +3,7 @@
 namespace Elven\Observability\PhpLegacy;
 
 use Elven\Observability\PhpLegacy\Config\EnvConfigResolver;
+use Elven\Observability\PhpLegacy\Export\OtlpHttpJsonLogExporter;
 use Elven\Observability\PhpLegacy\Export\OtlpHttpJsonMetricExporter;
 use Elven\Observability\PhpLegacy\Export\OtlpHttpJsonTraceExporter;
 use Elven\Observability\PhpLegacy\Logs\LogsFacade;
@@ -53,6 +54,7 @@ final class Observability
 
         $metricExporter = null;
         $traceExporter = null;
+        $logExporter = null;
         $metricsEnabled = $resolved->isEnabled() && strtolower($resolved->metricsExporter()) !== 'none';
         if ($metricsEnabled) {
             $metricExporter = new OtlpHttpJsonMetricExporter($resolved, $resource);
@@ -68,6 +70,9 @@ final class Observability
         if ($resolved->isEnabled() && strtolower($resolved->tracesExporter()) !== 'none') {
             $traceExporter = new OtlpHttpJsonTraceExporter($resolved, $resource);
         }
+        if ($resolved->isEnabled() && strtolower($resolved->logsExporter()) !== 'none') {
+            $logExporter = new OtlpHttpJsonLogExporter($resolved, $resource);
+        }
 
         $spanProcessor = new SpanProcessor($traceExporter, self::$metrics, $resolved->maxSpansPerRequest());
 
@@ -81,8 +86,15 @@ final class Observability
             self::$tracer = new NoopTracer();
         }
 
-        self::$logs = new LogsFacade($resolved, self::$tracer);
-        self::$handle = new ObservabilityHandle($resolved, $resource, $spanProcessor, self::$metrics);
+        self::$logs = new LogsFacade(
+            $resolved,
+            self::$tracer,
+            $logExporter,
+            $redactor,
+            self::$metrics,
+            $resolved->maxLogRecordsPerRequest()
+        );
+        self::$handle = new ObservabilityHandle($resolved, $resource, $spanProcessor, self::$logs, self::$metrics);
 
         if (!self::$shutdownRegistered) {
             self::$shutdownRegistered = true;

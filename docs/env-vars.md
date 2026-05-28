@@ -19,6 +19,7 @@
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | Base Collector endpoint. |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | `${endpoint}/v1/traces` | Signal-specific override. |
 | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | `${endpoint}/v1/metrics` | Signal-specific override. |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | `${endpoint}/v1/logs` | Signal-specific override for OTLP logs. |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/json` | `http/json` is supported in v1. |
 | `OTEL_EXPORTER_OTLP_HEADERS` | empty | Comma-separated `Header=value` list. |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | `200` | Milliseconds. |
@@ -49,8 +50,11 @@ Metric labels are restricted to low-cardinality keys: `service_name`, `service_n
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `OTEL_LOGS_EXPORTER` | `none` | OTLP logs export is not implemented in v1. |
-| `ELVEN_OTEL_LOG_CORRELATION_ENABLED` | `true` | Adds trace fields to existing logs. |
+| `OTEL_LOGS_EXPORTER` | `none` | Use `otlp` to export OTLP logs to Collector `/v1/logs`; keep `none` if logs are already scraped and you only need correlation. |
+| `ELVEN_OTEL_LOG_CORRELATION_ENABLED` | `true` | Adds trace fields to existing logs and OTLP log attributes. |
+| `ELVEN_OTEL_MAX_LOG_RECORDS_PER_REQUEST` | `512` | Excess OTLP log records in one request/job are dropped and counted. |
+
+The PHP app sends OTLP logs to the OpenTelemetry Collector, not directly to Loki. Configure the Collector logs pipeline to forward to Loki.
 
 ## Privacy
 

@@ -38,6 +38,7 @@ final class FakeCollectorIntegrationTest extends TestCase
     {
         putenv('OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:' . $this->port);
         putenv('OTEL_EXPORTER_OTLP_PROTOCOL=http/json');
+        putenv('OTEL_LOGS_EXPORTER=otlp');
         putenv('ELVEN_OTEL_EXPORT_TIMEOUT_MS=1000');
 
         $handle = Observability::init(array(
@@ -48,6 +49,7 @@ final class FakeCollectorIntegrationTest extends TestCase
 
         Observability::tracer()->withSpan('integration.operation', function ($span) {
             $span->setAttribute('custom.safe_attribute', 'value');
+            Observability::logs()->emit('INFO', 'integration log', array('operation' => 'ticket_search'));
             Observability::metrics()->counter('booking.ticket.search.started')->add(1, array(
                 'operation' => 'ticket_search',
                 'route' => '/rest/v14/ticket/search',
@@ -58,10 +60,12 @@ final class FakeCollectorIntegrationTest extends TestCase
         self::assertTrue($handle->forceFlush());
 
         $events = $this->readEvents();
-        self::assertCount(2, $events);
+        self::assertCount(3, $events);
         self::assertSame('/v1/traces', $events[0]['path']);
-        self::assertSame('/v1/metrics', $events[1]['path']);
+        self::assertSame('/v1/logs', $events[1]['path']);
+        self::assertSame('/v1/metrics', $events[2]['path']);
         self::assertSame('legacy-booking-api', $events[0]['body']['resourceSpans'][0]['resource']['attributes'][0]['value']['stringValue']);
+        self::assertSame('integration log', $events[1]['body']['resourceLogs'][0]['scopeLogs'][0]['logRecords'][0]['body']['stringValue']);
     }
 
     public function testServerSpanMarksErrorAndCurlInjectsTraceparent(): void
@@ -134,7 +138,7 @@ final class FakeCollectorIntegrationTest extends TestCase
         do {
             if (file_exists($this->eventsFile)) {
                 $lines = array_values(array_filter(explode("\n", trim(file_get_contents($this->eventsFile)))));
-                if (count($lines) >= 2) {
+                if (count($lines) >= 3) {
                     return array_map(function ($line) {
                         return json_decode($line, true);
                     }, $lines);

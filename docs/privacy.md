@@ -9,6 +9,8 @@ This library is private by default:
 - No SOAP XML capture.
 - No raw message payload capture.
 - No raw DB statement export.
+- OTLP log export is off until `OTEL_LOGS_EXPORTER=otlp` is set.
+- OTLP log body and attributes are redacted and bounded before export.
 - No raw Redis/Memcached keys by default.
 - No raw Mongo query/document capture.
 - No raw Elasticsearch/OpenSearch query capture.
@@ -29,6 +31,14 @@ String values are scanned for:
 - CPF-like values.
 - Payment-card-like numbers.
 - High-cardinality opaque identifiers in URL paths and metric labels.
+
+## Logs
+
+When `OTEL_LOGS_EXPORTER=otlp`, the library exports log records to Collector `/v1/logs`. It does not send directly to Loki.
+
+Log messages and context/extra attributes are still application-controlled text, so treat them as sensitive. The library redacts common token, password, CPF, email, card, cookie, Authorization, and secret patterns, truncates very large values, and avoids serializing objects or exception stack traces by default.
+
+Do not log request/response bodies, SOAP XML, customer payloads, raw user identifiers, raw DB statements, tokens, or private keys. If logs are already scraped from files/stdout, enable only `MonologTraceProcessor` and keep `OTEL_LOGS_EXPORTER=none` to avoid duplicate Loki records.
 
 ## Database Statements
 

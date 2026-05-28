@@ -15,6 +15,7 @@ final class ObservabilityConfig
     private $endpoint;
     private $tracesEndpoint;
     private $metricsEndpoint;
+    private $logsEndpoint;
     private $protocol;
     private $headers;
     private $timeoutMillis;
@@ -30,6 +31,7 @@ final class ObservabilityConfig
     private $allowRawAttributes;
     private $maxSpansPerRequest;
     private $maxMetricPointsPerRequest;
+    private $maxLogRecordsPerRequest;
     private $fingerprint;
 
     public function __construct(array $values)
@@ -45,6 +47,7 @@ final class ObservabilityConfig
         $this->endpoint = (string) $values['endpoint'];
         $this->tracesEndpoint = (string) $values['traces_endpoint'];
         $this->metricsEndpoint = (string) $values['metrics_endpoint'];
+        $this->logsEndpoint = (string) $values['logs_endpoint'];
         $this->protocol = (string) $values['protocol'];
         $this->headers = (array) $values['headers'];
         $this->timeoutMillis = (int) $values['timeout_millis'];
@@ -60,6 +63,7 @@ final class ObservabilityConfig
         $this->allowRawAttributes = (array) $values['allow_raw_attributes'];
         $this->maxSpansPerRequest = (int) $values['max_spans_per_request'];
         $this->maxMetricPointsPerRequest = (int) $values['max_metric_points_per_request'];
+        $this->maxLogRecordsPerRequest = (int) $values['max_log_records_per_request'];
         $this->fingerprint = $this->buildFingerprint();
     }
 
@@ -116,6 +120,11 @@ final class ObservabilityConfig
     public function metricsEndpoint()
     {
         return $this->metricsEndpoint;
+    }
+
+    public function logsEndpoint()
+    {
+        return $this->logsEndpoint;
     }
 
     public function protocol()
@@ -193,6 +202,11 @@ final class ObservabilityConfig
         return $this->maxMetricPointsPerRequest;
     }
 
+    public function maxLogRecordsPerRequest()
+    {
+        return $this->maxLogRecordsPerRequest;
+    }
+
     public function hasPropagator($name)
     {
         return in_array(strtolower((string) $name), array_map('strtolower', $this->propagators), true);
@@ -216,6 +230,7 @@ final class ObservabilityConfig
             'endpoint' => $this->endpoint,
             'traces_endpoint' => $this->tracesEndpoint,
             'metrics_endpoint' => $this->metricsEndpoint,
+            'logs_endpoint' => $this->logsEndpoint,
             'protocol' => $this->protocol,
             'headers' => $this->headers,
             'timeout_millis' => $this->timeoutMillis,
@@ -231,6 +246,7 @@ final class ObservabilityConfig
             'allow_raw_attributes' => $this->allowRawAttributes,
             'max_spans_per_request' => $this->maxSpansPerRequest,
             'max_metric_points_per_request' => $this->maxMetricPointsPerRequest,
+            'max_log_records_per_request' => $this->maxLogRecordsPerRequest,
         );
         ksort($values);
         $encoded = json_encode($values);

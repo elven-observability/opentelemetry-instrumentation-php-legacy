@@ -7,7 +7,7 @@ This guide shows how to integrate the library into a legacy PHP app that uses Sl
 Keep the target application's existing Composer platform constraint. This library supports `php >=7.3.13`.
 
 ```bash
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.1
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.2
 ```
 
 ## Environment
@@ -26,11 +26,12 @@ OTEL_PROPAGATORS=tracecontext,baggage
 OTEL_TRACES_SAMPLER=parentbased_traceidratio
 OTEL_TRACES_SAMPLER_ARG=1
 OTEL_METRICS_EXPORTER=otlp
-OTEL_LOGS_EXPORTER=none
+OTEL_LOGS_EXPORTER=otlp
 ELVEN_OTEL_LOG_CORRELATION_ENABLED=true
 ELVEN_OTEL_CAPTURE_DB_STATEMENT=false
 ELVEN_OTEL_REDACT_DB_STATEMENT=true
 ELVEN_OTEL_MAX_SPANS_PER_REQUEST=128
+ELVEN_OTEL_MAX_LOG_RECORDS_PER_REQUEST=512
 ELVEN_OTEL_EXPORT_TIMEOUT_MS=200
 ```
 
@@ -129,8 +130,10 @@ Do not disable SQL redaction in production without a written privacy exception.
 
 ```php
 use Elven\Observability\PhpLegacy\Logs\MonologTraceProcessor;
+use Elven\Observability\PhpLegacy\Logs\MonologOtlpHandler;
 
 $logger->pushProcessor(new MonologTraceProcessor());
+$logger->pushHandler(new MonologOtlpHandler());
 ```
 
 For custom log wrappers:
@@ -138,6 +141,8 @@ For custom log wrappers:
 ```php
 $context = Observability::logs()->correlate($context);
 ```
+
+The OTLP handler sends logs to Collector `/v1/logs` for routing to Loki. If the app already has file/stdout scraping into Loki, keep only `MonologTraceProcessor` and set `OTEL_LOGS_EXPORTER=none`.
 
 ## NGINX And PHP-FPM
 

@@ -1,6 +1,6 @@
 {
   "name": "elven-observability/opentelemetry-instrumentation-php-legacy",
-  "description": "Privacy-first OpenTelemetry-compatible traces, metrics, and log correlation for legacy PHP applications without PECL dependencies.",
+  "description": "Privacy-first OpenTelemetry-compatible traces, metrics, OTLP logs, and log correlation for legacy PHP applications without PECL dependencies.",
   "type": "library",
   "license": "Apache-2.0",
   "authors": [
@@ -38,7 +38,7 @@
     "ext-curl": "Recommended for low-overhead OTLP HTTP export and curl header injection examples.",
     "ext-soap": "Required only for SOAP/WCF instrumentation examples.",
     "guzzlehttp/guzzle": "Required only for Guzzle middleware integration.",
-    "monolog/monolog": "Required only for Monolog 1 log correlation.",
+    "monolog/monolog": "Required only for Monolog 1 log correlation and OTLP log handler.",
     "slim/slim": "Required only for Slim 2 examples."
   },
   "autoload": {

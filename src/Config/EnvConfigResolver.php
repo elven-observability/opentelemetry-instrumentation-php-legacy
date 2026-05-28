@@ -22,6 +22,11 @@ final class EnvConfigResolver
             'metrics_endpoint',
             self::env('OTEL_EXPORTER_OTLP_METRICS_ENDPOINT', self::signalEndpoint($endpoint, 'metrics'))
         );
+        $logsEndpoint = self::string(
+            $explicit,
+            'logs_endpoint',
+            self::env('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT', self::signalEndpoint($endpoint, 'logs'))
+        );
 
         $enabledEnv = self::env('ELVEN_OTEL_ENABLED', null);
         $enabled = self::bool($explicit, 'enabled', $enabledEnv === null ? 'true' : $enabledEnv);
@@ -61,6 +66,7 @@ final class EnvConfigResolver
             'endpoint' => $endpoint,
             'traces_endpoint' => $tracesEndpoint,
             'metrics_endpoint' => $metricsEndpoint,
+            'logs_endpoint' => $logsEndpoint,
             'protocol' => $protocol,
             'headers' => array_merge(self::parseKeyValueList(self::env('OTEL_EXPORTER_OTLP_HEADERS', '')), self::arrayValue($explicit, 'headers')),
             'timeout_millis' => self::int($explicit, 'timeout_millis', self::env('ELVEN_OTEL_EXPORT_TIMEOUT_MS', self::env('OTEL_EXPORTER_OTLP_TIMEOUT', '200')), 1),
@@ -81,6 +87,12 @@ final class EnvConfigResolver
                 self::env('ELVEN_OTEL_MAX_METRIC_POINTS_PER_REQUEST', '512'),
                 1
             ),
+            'max_log_records_per_request' => self::int(
+                $explicit,
+                'max_log_records_per_request',
+                self::env('ELVEN_OTEL_MAX_LOG_RECORDS_PER_REQUEST', '512'),
+                1
+            ),
         ));
     }
 
@@ -99,7 +111,7 @@ final class EnvConfigResolver
     private static function signalEndpoint($endpoint, $signal)
     {
         $endpoint = rtrim($endpoint, '/');
-        if (preg_match('#/v1/(traces|metrics)$#', $endpoint)) {
+        if (preg_match('#/v1/(traces|metrics|logs)$#', $endpoint)) {
             return $endpoint;
         }
         return $endpoint . '/v1/' . $signal;

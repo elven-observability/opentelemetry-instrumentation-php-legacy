@@ -1,6 +1,6 @@
 # Elven OpenTelemetry Instrumentation PHP Legacy
 
-Production-oriented OpenTelemetry-compatible traces, metrics, and log correlation for legacy PHP applications.
+Production-oriented OpenTelemetry-compatible traces, metrics, OTLP logs, and log correlation for legacy PHP applications.
 
 This library is for PHP apps that cannot safely use the official OpenTelemetry PHP SDK or the PECL `opentelemetry` extension yet. It supports `php >=7.3.13`, exports OTLP HTTP/JSON directly to an OpenTelemetry Collector, propagates W3C trace context, and never lets telemetry failures break the application.
 
@@ -9,12 +9,12 @@ This library is for PHP apps that cannot safely use the official OpenTelemetry P
 - Creates PHP internal spans for legacy/custom apps.
 - Continues upstream traces through W3C `traceparent`, `tracestate`, and `baggage`.
 - Injects trace headers into outbound HTTP, cURL, Guzzle, SOAP/WCF, and custom wrappers.
-- Exports traces to `/v1/traces` and metrics to `/v1/metrics` over OTLP HTTP/JSON.
+- Exports traces to `/v1/traces`, metrics to `/v1/metrics`, and logs to `/v1/logs` over OTLP HTTP/JSON.
 - Adds `trace_id` and `span_id` to Monolog 1 or custom log contexts.
+- Can send Monolog/custom application logs to the OpenTelemetry Collector so the Collector can route them to Loki.
 - Emits low-cardinality request, dependency, exporter, and business metrics.
 - Redacts sensitive attributes by default.
-- Drops excessive spans and metric points per request instead of growing unbounded memory.
-- Keeps logs in the existing logging pipeline. OTLP log export is intentionally out of scope.
+- Drops excessive spans, metric points, and log records per request instead of growing unbounded memory.
 
 ## Safe Defaults
 
@@ -27,7 +27,9 @@ Default behavior is intentionally conservative:
 - Sampler: `parentbased_traceidratio` with ratio `1`.
 - Max spans per request: `128`.
 - Max metric points per request: `512`.
+- Max OTLP log records per request: `512`.
 - Monolog/custom log correlation: enabled.
+- OTLP logs exporter: disabled unless `OTEL_LOGS_EXPORTER=otlp` is set, to avoid accidentally duplicating an existing log pipeline.
 - Payload, body, XML, cookies, tokens, passwords, Authorization, raw user id, and raw SQL capture: disabled.
 - DB spans include `db.query.summary`; raw `db.statement` is redacted unless explicitly enabled.
 
@@ -51,7 +53,7 @@ Optional integrations:
 - `ext-curl` for lower-overhead OTLP export and cURL examples.
 - `ext-soap` for SOAP/WCF examples.
 - `guzzlehttp/guzzle` for Guzzle middleware.
-- `monolog/monolog` for Monolog 1 log correlation.
+- `monolog/monolog` for Monolog 1 log correlation and OTLP log export handler.
 - `slim/slim` for Slim 2 examples.
 
 ## Install
@@ -62,7 +64,7 @@ Use this while Packagist registration is pending. No GitHub token is required be
 
 ```bash
 composer config repositories.elven-php-legacy vcs https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.1
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.2
 ```
 
 For application repos, commit this in `composer.json`:
@@ -76,7 +78,7 @@ For application repos, commit this in `composer.json`:
     }
   ],
   "require": {
-    "elven-observability/opentelemetry-instrumentation-php-legacy": "^0.1"
+    "elven-observability/opentelemetry-instrumentation-php-legacy": "^0.2"
   }
 }
 ```
@@ -98,7 +100,7 @@ For apps pinned to PHP `7.3.13`, keep the app's existing Composer platform:
 After the package is registered on Packagist, the app can use only:
 
 ```bash
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.1
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.2
 ```
 
 Then remove the temporary `repositories` block from `composer.json`.
@@ -126,7 +128,7 @@ OTEL_TRACES_SAMPLER=parentbased_traceidratio
 OTEL_TRACES_SAMPLER_ARG=1
 
 OTEL_METRICS_EXPORTER=otlp
-OTEL_LOGS_EXPORTER=none
+OTEL_LOGS_EXPORTER=otlp
 ELVEN_OTEL_LOG_CORRELATION_ENABLED=true
 
 ELVEN_OTEL_CAPTURE_DB_STATEMENT=false
@@ -135,10 +137,39 @@ ELVEN_OTEL_ALLOW_RAW_ATTRIBUTES=
 
 ELVEN_OTEL_MAX_SPANS_PER_REQUEST=128
 ELVEN_OTEL_MAX_METRIC_POINTS_PER_REQUEST=512
+ELVEN_OTEL_MAX_LOG_RECORDS_PER_REQUEST=512
 ELVEN_OTEL_DEBUG=false
 ```
 
 The PHP app does not need an Elven token when it sends telemetry to a customer-owned or local Collector. Backend credentials belong in the Collector config.
+
+If logs are already collected from files/stdout and you do not want duplicate Loki entries, use `OTEL_LOGS_EXPORTER=none` and keep only the log correlation processor.
+
+Minimal Collector logs pipeline for Loki native OTLP ingestion:
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/loki]
+```
+
+For Loki deployments that do not already enable structured metadata, set `limits_config.allow_structured_metadata=true` in Loki. Keep tenant/auth configuration in the Collector, not in PHP.
 
 ## Step 2: Forward Trace Headers Through NGINX/PHP-FPM
 
@@ -299,23 +330,37 @@ Do not use this in production without explicit written approval:
 ELVEN_OTEL_REDACT_DB_STATEMENT=false
 ```
 
-## Step 7: Add Log Correlation
+## Step 7: Add Logs For Loki Via Collector
 
-For Monolog 1:
+This library does not send directly to Loki. It sends OTLP logs to the OpenTelemetry Collector at `/v1/logs`; the Collector should route those logs to Loki. This keeps Loki credentials and backend routing out of the PHP app.
+
+For Monolog 1 correlation plus OTLP log export:
 
 ```php
+use Elven\Observability\PhpLegacy\Logs\MonologOtlpHandler;
 use Elven\Observability\PhpLegacy\Logs\MonologTraceProcessor;
 
 $logger->pushProcessor(new MonologTraceProcessor());
+$logger->pushHandler(new MonologOtlpHandler());
 ```
 
-For custom log wrappers:
+For custom log wrappers that still write to the existing log pipeline:
 
 ```php
 use Elven\Observability\PhpLegacy\Observability;
 
 $context = Observability::logs()->correlate($context);
 $logger->info('ticket search started', $context);
+```
+
+For custom log wrappers that should also emit OTLP logs:
+
+```php
+use Elven\Observability\PhpLegacy\Observability;
+
+Observability::logs()->emit('INFO', 'ticket search started', array(
+    'operation' => 'ticket_search',
+));
 ```
 
 Every correlated log receives:
@@ -327,7 +372,7 @@ Every correlated log receives:
 - `environment`
 - `hostname`
 
-Logs are not exported by this library. They continue through the existing log pipeline.
+The log body and attributes are redacted and bounded before export. Do not put request/response payloads, XML, tokens, cookies, passwords, CPF, email, card data, or raw customer identifiers in log messages.
 
 ## Step 8: Add Business Metrics
 
@@ -382,6 +427,7 @@ Expected fake Collector paths:
 
 - `/v1/traces`
 - `/v1/metrics`
+- `/v1/logs`
 
 ## Step 10: Validate In Staging
 
@@ -393,6 +439,7 @@ Before canary:
 - Outbound HTTP/SOAP/WCF calls receive child `traceparent` headers.
 - Error responses and exceptions mark spans as `ERROR`.
 - Logs contain `trace_id` and `span_id`.
+- If `OTEL_LOGS_EXPORTER=otlp`, the Collector receives `/v1/logs` and Loki receives the routed entries.
 - DB spans contain `db.query.summary`.
 - Raw SQL remains redacted unless controlled troubleshooting envs are enabled.
 - Fake JWT, bearer token, cookie, CPF, email, card, and SQL literals are redacted.
@@ -450,7 +497,7 @@ Collector unavailable:
 5. Register `$otelHandle->shutdown()` with `register_shutdown_function()`.
 6. Wrap the central route/controller invocation with a stable server span.
 7. Wrap outbound HTTP, cURL, Guzzle, SOAP/WCF, DB, cache, queue, mail, storage, and search calls where useful.
-8. Add Monolog 1 processor or custom `Observability::logs()->correlate($context)`.
+8. Add Monolog 1 processor plus `MonologOtlpHandler`, or custom `Observability::logs()->correlate($context)` / `Observability::logs()->emit(...)`.
 9. Add only low-cardinality business metrics.
 10. Validate staging before canary.
 

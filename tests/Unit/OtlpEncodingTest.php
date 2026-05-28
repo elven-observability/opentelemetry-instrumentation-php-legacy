@@ -3,8 +3,10 @@
 namespace Elven\Observability\PhpLegacy\Tests\Unit;
 
 use Elven\Observability\PhpLegacy\Config\EnvConfigResolver;
+use Elven\Observability\PhpLegacy\Export\OtlpHttpJsonLogExporter;
 use Elven\Observability\PhpLegacy\Export\OtlpHttpJsonMetricExporter;
 use Elven\Observability\PhpLegacy\Export\OtlpHttpJsonTraceExporter;
+use Elven\Observability\PhpLegacy\Logs\LogsFacade;
 use Elven\Observability\PhpLegacy\Metrics\MetricFacade;
 use Elven\Observability\PhpLegacy\Privacy\AttributeRedactor;
 use Elven\Observability\PhpLegacy\Resource\ResourceBuilder;
@@ -78,5 +80,49 @@ final class OtlpEncodingTest extends TestCase
 
         self::assertContains('business.operation.started', $names);
         self::assertContains('elven.php.exporter.dropped_metric_points', $names);
+    }
+
+    public function testLogPayloadContainsResourceCorrelationAndRedactedBody(): void
+    {
+        $config = EnvConfigResolver::resolve(array(
+            'service_name' => 'legacy-test',
+            'logs_exporter' => 'otlp',
+        ));
+        $resource = ResourceBuilder::build($config);
+        $redactor = new AttributeRedactor($config);
+        $metrics = new MetricFacade(null, $redactor);
+        $processor = new SpanProcessor(null, $metrics, 128);
+        $tracer = new Tracer(new ParentBasedTraceIdRatioSampler(1.0), $processor, $redactor, SpanContext::invalid());
+        $logs = new LogsFacade($config, $tracer, new OtlpHttpJsonLogExporter($config, $resource), $redactor, $metrics);
+
+        $tracer->withSpan('log-parent', function () use ($logs) {
+            $logs->emit('info', 'Bearer abc.def.ghi user test@example.com', array(
+                'operation' => 'ticket_search',
+                'password' => 'secret',
+            ));
+        });
+
+        $records = $this->drainLogRecords($logs);
+        $payload = (new OtlpHttpJsonLogExporter($config, $resource))->payload($records);
+        $record = $payload['resourceLogs'][0]['scopeLogs'][0]['logRecords'][0];
+
+        self::assertSame('legacy-test', $payload['resourceLogs'][0]['resource']['attributes'][0]['value']['stringValue']);
+        self::assertMatchesRegularExpression('/^[a-f0-9]{32}$/', $record['traceId']);
+        self::assertMatchesRegularExpression('/^[a-f0-9]{16}$/', $record['spanId']);
+        self::assertSame(1, $record['flags']);
+        self::assertSame(9, $record['severityNumber']);
+        self::assertStringNotContainsString('abc.def.ghi', $record['body']['stringValue']);
+        self::assertStringNotContainsString('test@example.com', $record['body']['stringValue']);
+        self::assertSame('[REDACTED]', $record['attributes'][1]['value']['stringValue']);
+    }
+
+    private function drainLogRecords(LogsFacade $logs): array
+    {
+        $reflection = new \ReflectionClass($logs);
+        $property = $reflection->getProperty('records');
+        $property->setAccessible(true);
+        $records = $property->getValue($logs);
+        $property->setValue($logs, array());
+        return is_array($records) ? $records : array();
     }
 }

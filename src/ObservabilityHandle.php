@@ -3,6 +3,7 @@
 namespace Elven\Observability\PhpLegacy;
 
 use Elven\Observability\PhpLegacy\Config\ObservabilityConfig;
+use Elven\Observability\PhpLegacy\Logs\LogsFacade;
 use Elven\Observability\PhpLegacy\Metrics\MetricFacade;
 use Elven\Observability\PhpLegacy\Trace\SpanProcessor;
 
@@ -11,6 +12,7 @@ final class ObservabilityHandle
     private $config;
     private $resource;
     private $spanProcessor;
+    private $logs;
     private $metrics;
     private $shutdown;
 
@@ -18,11 +20,13 @@ final class ObservabilityHandle
         ObservabilityConfig $config,
         array $resource,
         SpanProcessor $spanProcessor,
+        LogsFacade $logs,
         MetricFacade $metrics
     ) {
         $this->config = $config;
         $this->resource = $resource;
         $this->spanProcessor = $spanProcessor;
+        $this->logs = $logs;
         $this->metrics = $metrics;
         $this->shutdown = false;
     }
@@ -31,8 +35,9 @@ final class ObservabilityHandle
     {
         try {
             $spansOk = $this->spanProcessor->forceFlush();
+            $logsOk = $this->logs->forceFlush();
             $metricsOk = $this->metrics->forceFlush();
-            return $spansOk && $metricsOk;
+            return $spansOk && $logsOk && $metricsOk;
         } catch (\Throwable $e) {
             return false;
         }

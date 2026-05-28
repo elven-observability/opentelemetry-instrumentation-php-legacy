@@ -14,9 +14,9 @@ The library is intentionally small and explicit:
 - `Propagation\BaggagePropagator` implements bounded basic baggage.
 - `Trace\Tracer`, `Trace\Span`, and `Trace\SpanProcessor` manage active spans, nesting, sampling, limits, and request-local flushing.
 - `Trace\Sampler\ParentBasedTraceIdRatioSampler` implements `parentbased_traceidratio`, `always_on`, and `always_off`.
-- `Export\OtlpHttpJsonTraceExporter` and `Export\OtlpHttpJsonMetricExporter` encode OTLP JSON and send HTTP POSTs to Collector endpoints.
+- `Export\OtlpHttpJsonTraceExporter`, `Export\OtlpHttpJsonMetricExporter`, and `Export\OtlpHttpJsonLogExporter` encode OTLP JSON and send HTTP POSTs to Collector endpoints.
 - `Metrics\MetricFacade` provides counters, histograms, and gauges with low-cardinality label enforcement.
-- `Logs\MonologTraceProcessor` and `Logs\LogsFacade` add correlation fields to existing logs.
+- `Logs\MonologTraceProcessor` adds correlation fields to existing logs, while `Logs\MonologOtlpHandler` and `Logs\LogsFacade` can emit bounded OTLP log records.
 - `Privacy` classes redact sensitive attributes, URLs, and DB statements.
 - `Instrumentation` classes provide manual opt-in wrappers for HTTP server/client, cURL, Guzzle, SOAP/WCF, DB, Redis, Memcached, Mongo, AMQP, mail, AWS, and search clients.
 
@@ -24,19 +24,19 @@ The library is intentionally small and explicit:
 
 `Observability::init()` is idempotent for identical config and reinitializes safely when explicit config changes, flushing the previous handle first. It registers one shutdown function, resolves config, builds resources, creates exporters, refreshes incoming W3C context from `$_SERVER` when no span is active, and returns an `ObservabilityHandle`.
 
-`forceFlush()` flushes ended spans first and metrics second, returning `false` when either exporter fails. Failed exports are retained in bounded request-local buffers for a later retry, and exporter failures are counted as internal metrics. `shutdown()` records peak memory, calls `forceFlush()`, clears active span scope, and invalidates stale root context.
+`forceFlush()` flushes ended spans first, OTLP log records second, and metrics last, returning `false` when any exporter fails. Metrics are last so log-export failures can still be reported through `elven.php.exporter.failed_exports`. Failed span/log exports are retained in bounded request-local buffers for a later retry, and exporter failures are counted as internal metrics. `shutdown()` records peak memory, calls `forceFlush()`, clears active span scope, and invalidates stale root context.
 
 ## Export Strategy
 
-OTLP HTTP/JSON is the v1 wire format because it is supported by the OTLP spec and avoids PHP 7.3 protobuf dependency risk. Payloads follow the resource/scope/span and resource/scope/metric OTLP JSON shape.
+OTLP HTTP/JSON is the v1 wire format because it is supported by the OTLP spec and avoids PHP 7.3 protobuf dependency risk. Payloads follow the resource/scope/span, resource/scope/metric, and resource/scope/log OTLP JSON shape.
 
-The app should export to a customer/local Collector. The application does not need Elven backend credentials when using that path.
+The app should export to a customer/local Collector. The application does not need Elven backend credentials when using that path. Logs are not sent directly to Loki from PHP; the Collector owns the Loki exporter/routing and any backend credentials.
 
 ## Privacy Strategy
 
 The library never captures request bodies, response bodies, SOAP XML, raw message payloads, raw Redis keys, raw Mongo queries, raw Elasticsearch queries, or raw DB statements by default.
 
-Sensitive headers, paths, query values, exception messages, and baggage values are redacted before storage/export. Explicit user identifiers are hashed. Metric labels are allowlisted, normalized, and bounded to prevent accidental cardinality explosions.
+Sensitive headers, paths, query values, exception messages, log body text, log attributes, and baggage values are redacted before storage/export. Explicit user identifiers are hashed. Metric labels are allowlisted, normalized, and bounded to prevent accidental cardinality explosions.
 
 ## Failure Model
 
@@ -46,5 +46,6 @@ Telemetry must not break the application. The exporter uses short timeouts, catc
 
 - Manual wrappers are used instead of auto-instrumentation because the target app is Slim 2/custom legacy PHP.
 - Metrics are request-local deltas because PHP-FPM multi-process workers are not a reliable source for process-global gauges.
+- OTLP log export is opt-in because many legacy apps already ship logs through file/stdout agents; enabling both paths can duplicate Loki entries.
 - Long-running workers must call `init()` and `shutdown()` per logical request/job. The singleton API remains PHP-FPM-friendly, but request context is explicitly refreshed to avoid cross-request trace leakage.
 - Official SDK adapter is deferred until target apps can run a compatible PHP version.
