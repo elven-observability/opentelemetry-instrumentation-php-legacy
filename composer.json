@@ -1,0 +1,79 @@
+{
+  "name": "elven-observability/opentelemetry-instrumentation-php-legacy",
+  "description": "Privacy-first OpenTelemetry-compatible traces, metrics, and log correlation for legacy PHP applications without PECL dependencies.",
+  "type": "library",
+  "license": "Apache-2.0",
+  "authors": [
+    {
+      "name": "Elven Observability",
+      "email": "opensource@elvenobservability.com"
+    }
+  ],
+  "keywords": [
+    "opentelemetry",
+    "observability",
+    "tracing",
+    "metrics",
+    "monolog",
+    "legacy-php"
+  ],
+  "homepage": "https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy",
+  "support": {
+    "issues": "https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy/issues",
+    "source": "https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy"
+  },
+  "require": {
+    "php": ">=7.3.13",
+    "ext-json": "*"
+  },
+  "require-dev": {
+    "guzzlehttp/guzzle": "^7.5",
+    "monolog/monolog": "^1.27",
+    "phpstan/phpstan": "^1.10",
+    "phpunit/phpunit": "^9.6",
+    "slim/slim": "^2.6",
+    "squizlabs/php_codesniffer": "^3.7"
+  },
+  "suggest": {
+    "ext-curl": "Recommended for low-overhead OTLP HTTP export and curl header injection examples.",
+    "ext-soap": "Required only for SOAP/WCF instrumentation examples.",
+    "guzzlehttp/guzzle": "Required only for Guzzle middleware integration.",
+    "monolog/monolog": "Required only for Monolog 1 log correlation.",
+    "slim/slim": "Required only for Slim 2 examples."
+  },
+  "autoload": {
+    "psr-4": {
+      "Elven\\Observability\\PhpLegacy\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Elven\\Observability\\PhpLegacy\\Tests\\": "tests/"
+    }
+  },
+  "config": {
+    "platform": {
+      "php": "7.3.13"
+    },
+    "sort-packages": true
+  },
+  "scripts": {
+    "lint": "find src tests examples benchmarks -name '*.php' -print0 | xargs -0 -n1 php -l",
+    "cs": "phpcs",
+    "stan": "phpstan analyse --memory-limit=512M",
+    "test": "phpunit",
+    "test:unit": "phpunit --testsuite unit",
+    "test:integration": "phpunit --testsuite integration",
+    "bench": "php benchmarks/run.php",
+    "collector:fake": "php examples/fake-collector/server.php",
+    "check": [
+      "@lint",
+      "@cs",
+      "@stan",
+      "@test",
+      "@bench"
+    ]
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}

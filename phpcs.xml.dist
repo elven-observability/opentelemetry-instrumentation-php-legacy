@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<ruleset name="Elven PHP Legacy Observability">
+    <description>PSR-12 checks for the PHP legacy observability library.</description>
+
+    <file>src</file>
+    <file>tests</file>
+    <file>examples</file>
+    <file>benchmarks</file>
+
+    <arg name="warning-severity" value="0"/>
+
+    <exclude-pattern>vendor/*</exclude-pattern>
+
+    <rule ref="PSR12">
+        <exclude name="PSR1.Methods.CamelCapsMethodName.NotCamelCaps"/>
+    </rule>
+</ruleset>

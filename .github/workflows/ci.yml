@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["7.3", "7.4", "8.0", "8.1"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: json, curl, soap
+          coverage: none
+          tools: composer:v2
+
+      - name: Validate Composer metadata
+        run: composer validate --strict
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Lint
+        run: composer lint
+
+      - name: Code style
+        run: composer cs
+
+      - name: Static analysis
+        run: composer stan
+
+      - name: Tests
+        run: composer test
+
+      - name: Benchmark report
+        run: composer bench

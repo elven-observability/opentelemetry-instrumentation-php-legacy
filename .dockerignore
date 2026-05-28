@@ -1,0 +1,9 @@
+.git
+vendor
+composer.lock
+var
+.phpunit.cache
+.phpunit.result.cache
+.phpstan.cache
+coverage
+build
