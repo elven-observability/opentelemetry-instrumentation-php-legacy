@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 - 2026-05-29
+
+- Added bounded traffic attribution through `Attribution\TrafficSourceResolver`.
+- Added request-level metric attributes with `MetricFacade::setRequestAttributes()`, `addRequestAttributes()`, and `clearRequestAttributes()`.
+- Added safe metric labels `traffic_source` and `traffic_channel`, with normalization for owned frontend, metasearch, paid, partner, and backoffice flows.
+- Updated docs and tests so traffic attribution applies to all metrics emitted after request attributes are set.
+
 ## 0.2.0 - 2026-05-28
 
 - Added OTLP HTTP/JSON logs export to Collector `/v1/logs`, with `OTEL_LOGS_EXPORTER=otlp` and `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`.

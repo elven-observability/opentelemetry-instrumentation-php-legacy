@@ -46,6 +46,18 @@ The PHP app sends to Collector `/v1/logs`, not directly to Loki. Check the Colle
 
 If logs are duplicated, you probably have both OTLP log export and file/stdout scraping enabled. Keep one path: set `OTEL_LOGS_EXPORTER=none` to keep only correlation in the existing pipeline.
 
+## Traffic source labels missing from metrics
+
+Set request attributes before dependency/business metrics are emitted:
+
+```php
+$traffic = \Elven\Observability\PhpLegacy\Attribution\TrafficSourceResolver::attributesFromRequest($requestData, $_SERVER);
+\Elven\Observability\PhpLegacy\Observability::metrics()->setRequestAttributes($traffic);
+$span->setAttributes($traffic);
+```
+
+If the app passes only dynamic ids such as click id, redirect id, session id, or order id, the resolver will intentionally export `unknown`/`other` instead of the raw value. Map the app-specific source to stable categories such as `front`, `skyscanner`, `google_flights`, `mundi`, `kayak`, `viajala`, or `backend`.
+
 ## `http/protobuf` configured
 
 This v1 library supports `http/json`. If `http/protobuf` is configured, telemetry is disabled safely. Change:

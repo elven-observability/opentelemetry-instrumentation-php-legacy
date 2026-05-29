@@ -45,5 +45,8 @@ final class PrivacyTest extends TestCase
         self::assertSame('{id}', $redactor->redactMetricLabels(array(
             'operation' => 'order-ABCD1234EFGH5678',
         ), array('operation'))['operation']);
+        self::assertSame('google_flights', $redactor->redactMetricLabels(array(
+            'traffic_source' => 'Google Flights',
+        ), array('traffic_source'))['traffic_source']);
     }
 }

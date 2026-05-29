@@ -7,7 +7,7 @@ This guide shows how to integrate the library into a legacy PHP app that uses Sl
 Keep the target application's existing Composer platform constraint. This library supports `php >=7.3.13`.
 
 ```bash
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.2
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.3
 ```
 
 ## Environment
@@ -62,13 +62,18 @@ register_shutdown_function(function () use ($handle) {
 Wrap the real controller/action invocation and use a stable route name. Do not include request ids, order ids, user ids, CPF, email, tokens, or trace ids in the span name or metric labels.
 
 ```php
+use Elven\Observability\PhpLegacy\Attribution\TrafficSourceResolver;
 use Elven\Observability\PhpLegacy\Bridge\Legacy\RestRouteInstrumentation;
+use Elven\Observability\PhpLegacy\Observability;
 
 $result = RestRouteInstrumentation::traceRestAction(
     $version,
     $controller,
     $action,
-    function ($span) use ($serviceObject, $method, $requestData) {
+    function ($span) use ($serviceObject, $method, $requestData, $controller, $action) {
+        $traffic = TrafficSourceResolver::attributesFromRequest($requestData, $_SERVER);
+        Observability::metrics()->setRequestAttributes($traffic);
+        $span->setAttributes($traffic);
         $span->setAttribute('operation', strtolower($controller . '.' . $action));
         return $serviceObject->$method($requestData);
     }
@@ -76,6 +81,8 @@ $result = RestRouteInstrumentation::traceRestAction(
 ```
 
 The resulting route is `/rest/v{version}/{controller}/{action}` and the server span extracts inbound `traceparent`/`tracestate` automatically from `$_SERVER`.
+
+Traffic labels are inherited by all metrics emitted after `setRequestAttributes()`, including server duration, dependency duration, exporter metrics, and business counters.
 
 ## Downstream HTTP, SOAP, WCF, Or Internal Wrappers
 

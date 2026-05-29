@@ -2,6 +2,7 @@
 
 namespace Elven\Observability\PhpLegacy\Instrumentation;
 
+use Elven\Observability\PhpLegacy\Attribution\TrafficSourceResolver;
 use Elven\Observability\PhpLegacy\Observability;
 use Elven\Observability\PhpLegacy\Privacy\UrlSanitizer;
 use Elven\Observability\PhpLegacy\Propagation\TraceContextPropagator;
@@ -40,6 +41,10 @@ final class HttpServerInstrumentation
         if (isset($_SERVER['REMOTE_ADDR']) && getenv('ELVEN_OTEL_CAPTURE_CLIENT_ADDRESS') === 'true') {
             $status['attributes']['client.address'] = $_SERVER['REMOTE_ADDR'];
         }
+        $traffic = TrafficSourceResolver::attributesFromRequest(self::requestData(), $_SERVER);
+        $status['attributes'] = array_merge($status['attributes'], $traffic);
+        Observability::metrics()->setRequestAttributes($traffic);
+
         return Observability::tracer()->startSpan($method . ' ' . $route, $status);
     }
 
@@ -96,5 +101,10 @@ final class HttpServerInstrumentation
             return $_SERVER['HTTP_X_FORWARDED_PROTO'];
         }
         return 'http';
+    }
+
+    private static function requestData()
+    {
+        return array_merge($_GET, $_POST);
     }
 }

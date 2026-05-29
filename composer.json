@@ -14,6 +14,7 @@
     "observability",
     "tracing",
     "metrics",
+    "traffic-attribution",
     "monolog",
     "legacy-php"
   ],

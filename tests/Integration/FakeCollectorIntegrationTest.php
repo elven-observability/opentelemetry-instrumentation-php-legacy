@@ -2,6 +2,7 @@
 
 namespace Elven\Observability\PhpLegacy\Tests\Integration;
 
+use Elven\Observability\PhpLegacy\Attribution\TrafficSourceResolver;
 use Elven\Observability\PhpLegacy\Instrumentation\CurlInstrumentation;
 use Elven\Observability\PhpLegacy\Instrumentation\HttpServerInstrumentation;
 use Elven\Observability\PhpLegacy\Observability;
@@ -48,6 +49,9 @@ final class FakeCollectorIntegrationTest extends TestCase
         ));
 
         Observability::tracer()->withSpan('integration.operation', function ($span) {
+            $traffic = TrafficSourceResolver::attributesFromRequest(array('utmSource' => 'skyscanner'));
+            $span->setAttributes($traffic);
+            Observability::metrics()->setRequestAttributes($traffic);
             $span->setAttribute('custom.safe_attribute', 'value');
             Observability::logs()->emit('INFO', 'integration log', array('operation' => 'ticket_search'));
             Observability::metrics()->counter('booking.ticket.search.started')->add(1, array(
@@ -66,6 +70,7 @@ final class FakeCollectorIntegrationTest extends TestCase
         self::assertSame('/v1/metrics', $events[2]['path']);
         self::assertSame('legacy-booking-api', $events[0]['body']['resourceSpans'][0]['resource']['attributes'][0]['value']['stringValue']);
         self::assertSame('integration log', $events[1]['body']['resourceLogs'][0]['scopeLogs'][0]['logRecords'][0]['body']['stringValue']);
+        self::assertSame('skyscanner', $this->metricAttributeValue($events[2]['body'], 'traffic_source'));
     }
 
     public function testServerSpanMarksErrorAndCurlInjectsTraceparent(): void
@@ -73,12 +78,17 @@ final class FakeCollectorIntegrationTest extends TestCase
         putenv('OTEL_TRACES_EXPORTER=none');
         putenv('OTEL_METRICS_EXPORTER=none');
         $_SERVER['REQUEST_METHOD'] = 'GET';
-        $_SERVER['REQUEST_URI'] = '/rest/v14/ticket/search?token=secret';
+        $_SERVER['REQUEST_URI'] = '/rest/v14/ticket/search?utm_source=google_flights&token=secret';
         $_SERVER['SERVER_NAME'] = 'legacy.local';
         $_SERVER['SERVER_PORT'] = '8080';
+        $_GET = array('utm_source' => 'google_flights');
 
         Observability::init(array('service_name' => 'legacy-test'));
         HttpServerInstrumentation::instrument('/rest/v14/ticket/search', function () {
+            self::assertSame(
+                'google_flights',
+                Observability::metrics()->requestAttributes()['traffic_source']
+            );
             http_response_code(500);
             $headers = CurlInstrumentation::headersForCurl();
             self::assertMatchesRegularExpression('/^traceparent: 00-[a-f0-9]{32}-[a-f0-9]{16}-01$/', $headers[0]);
@@ -148,5 +158,28 @@ final class FakeCollectorIntegrationTest extends TestCase
         } while (microtime(true) < $deadline);
 
         return array();
+    }
+
+    private function metricAttributeValue(array $payload, $key)
+    {
+        $metrics = $payload['resourceMetrics'][0]['scopeMetrics'][0]['metrics'];
+        foreach ($metrics as $metric) {
+            $points = array();
+            if (isset($metric['sum']['dataPoints'])) {
+                $points = $metric['sum']['dataPoints'];
+            } elseif (isset($metric['histogram']['dataPoints'])) {
+                $points = $metric['histogram']['dataPoints'];
+            } elseif (isset($metric['gauge']['dataPoints'])) {
+                $points = $metric['gauge']['dataPoints'];
+            }
+            foreach ($points as $point) {
+                foreach ($point['attributes'] as $attribute) {
+                    if ($attribute['key'] === $key && isset($attribute['value']['stringValue'])) {
+                        return $attribute['value']['stringValue'];
+                    }
+                }
+            }
+        }
+        return null;
     }
 }

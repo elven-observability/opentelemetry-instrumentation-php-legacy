@@ -55,6 +55,8 @@ final class ObservabilityHandle
             return $ok;
         } catch (\Throwable $e) {
             return false;
+        } finally {
+            $this->metrics->clearRequestAttributes();
         }
     }
 

@@ -64,6 +64,33 @@ final class OtlpEncodingTest extends TestCase
         self::assertArrayHasKey('explicitBounds', $metrics[1]['histogram']['dataPoints'][0]);
     }
 
+    public function testMetricRequestAttributesApplyToAllPoints(): void
+    {
+        $config = EnvConfigResolver::resolve(array('service_name' => 'legacy-test'));
+        $redactor = new AttributeRedactor($config);
+        $facade = new MetricFacade(null, $redactor, array('service_name' => 'legacy-test', 'environment' => 'test'));
+        $facade->setRequestAttributes(array(
+            'traffic_source' => 'Sky Scanner',
+            'traffic_channel' => 'METASEARCH',
+            'partnerRedirectId' => 'must_drop',
+        ));
+        $facade->counter('business.operation.started')->add(1, array('operation' => 'ticket_search'));
+        $facade->histogram('http.server.request.duration')->record(10, array('route' => '/rest/v2/aerial/search'));
+
+        $payload = (new OtlpHttpJsonMetricExporter($config, ResourceBuilder::build($config)))->payload($facade->collect());
+        $metrics = $payload['resourceMetrics'][0]['scopeMetrics'][0]['metrics'];
+
+        self::assertSame(
+            'skyscanner',
+            $this->attributeValue($metrics[0]['sum']['dataPoints'][0]['attributes'], 'traffic_source')
+        );
+        self::assertSame(
+            'metasearch',
+            $this->attributeValue($metrics[1]['histogram']['dataPoints'][0]['attributes'], 'traffic_channel')
+        );
+        self::assertNull($this->attributeValue($metrics[0]['sum']['dataPoints'][0]['attributes'], 'partnerRedirectId'));
+    }
+
     public function testMetricFacadeDropsExcessPointsAndReportsDropMetric(): void
     {
         $config = EnvConfigResolver::resolve(array('service_name' => 'legacy-test'));
@@ -124,5 +151,27 @@ final class OtlpEncodingTest extends TestCase
         $records = $property->getValue($logs);
         $property->setValue($logs, array());
         return is_array($records) ? $records : array();
+    }
+
+    private function attributeValue(array $attributes, $key)
+    {
+        foreach ($attributes as $attribute) {
+            if ($attribute['key'] === $key) {
+                $value = $attribute['value'];
+                if (isset($value['stringValue'])) {
+                    return $value['stringValue'];
+                }
+                if (isset($value['intValue'])) {
+                    return $value['intValue'];
+                }
+                if (isset($value['doubleValue'])) {
+                    return $value['doubleValue'];
+                }
+                if (isset($value['boolValue'])) {
+                    return $value['boolValue'];
+                }
+            }
+        }
+        return null;
     }
 }

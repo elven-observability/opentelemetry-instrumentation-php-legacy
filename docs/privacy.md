@@ -46,8 +46,10 @@ Do not log request/response bodies, SOAP XML, customer payloads, raw user identi
 
 ## Metric Labels
 
-Only these labels are accepted: `service_name`, `service_namespace`, `environment`, `route`, `method`, `status_code`, `dependency_type`, `dependency_name`, `operation`, `error_type`.
+Only these labels are accepted: `service_name`, `service_namespace`, `environment`, `route`, `method`, `status_code`, `dependency_type`, `dependency_name`, `operation`, `error_type`, `traffic_source`, `traffic_channel`.
 
 Never use request IDs, order IDs, user IDs, tokens, CPF/email, trace IDs, or session IDs as metric labels.
 
 Allowed metric labels are still normalized: routes are path-sanitized, HTTP methods/status codes are constrained, and high-cardinality-looking `operation`, `dependency_name`, and `error_type` values collapse to safe placeholders.
+
+Traffic attribution labels are also normalized. `traffic_source` is limited to stable categories such as `front`, `google_flights`, `skyscanner`, `mundi`, `kayak`, `viajala`, `backend`, `other`, and `unknown`; high-cardinality-looking raw values collapse instead of being exported.

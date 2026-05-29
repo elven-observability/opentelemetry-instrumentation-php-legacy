@@ -44,7 +44,7 @@
 | `OTEL_METRICS_EXPORTER` | `otlp` | Use `none` to disable metric export. |
 | `ELVEN_OTEL_MAX_METRIC_POINTS_PER_REQUEST` | `512` | Excess metric series in one request/job are dropped and counted. |
 
-Metric labels are restricted to low-cardinality keys: `service_name`, `service_namespace`, `environment`, `route`, `method`, `status_code`, `dependency_type`, `dependency_name`, `operation`, `error_type`.
+Metric labels are restricted to low-cardinality keys: `service_name`, `service_namespace`, `environment`, `route`, `method`, `status_code`, `dependency_type`, `dependency_name`, `operation`, `error_type`, `traffic_source`, `traffic_channel`.
 
 ## Logs
 

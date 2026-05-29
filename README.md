@@ -13,6 +13,7 @@ This library is for PHP apps that cannot safely use the official OpenTelemetry P
 - Adds `trace_id` and `span_id` to Monolog 1 or custom log contexts.
 - Can send Monolog/custom application logs to the OpenTelemetry Collector so the Collector can route them to Loki.
 - Emits low-cardinality request, dependency, exporter, and business metrics.
+- Adds bounded traffic attribution labels, such as `traffic_source=skyscanner` and `traffic_channel=metasearch`.
 - Redacts sensitive attributes by default.
 - Drops excessive spans, metric points, and log records per request instead of growing unbounded memory.
 
@@ -64,7 +65,7 @@ Use this while Packagist registration is pending. No GitHub token is required be
 
 ```bash
 composer config repositories.elven-php-legacy vcs https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.2
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.3
 ```
 
 For application repos, commit this in `composer.json`:
@@ -78,7 +79,7 @@ For application repos, commit this in `composer.json`:
     }
   ],
   "require": {
-    "elven-observability/opentelemetry-instrumentation-php-legacy": "^0.2"
+    "elven-observability/opentelemetry-instrumentation-php-legacy": "^0.3"
   }
 }
 ```
@@ -100,7 +101,7 @@ For apps pinned to PHP `7.3.13`, keep the app's existing Composer platform:
 After the package is registered on Packagist, the app can use only:
 
 ```bash
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.2
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.3
 ```
 
 Then remove the temporary `repositories` block from `composer.json`.
@@ -235,6 +236,27 @@ $result = HttpServerInstrumentation::instrument($route, function ($span) use ($h
 ```
 
 Server spans automatically include safe HTTP attributes such as method, route, sanitized path, server address, response status, service name, environment, and host name.
+
+## Step 4.1: Attribute Traffic Source
+
+`HttpServerInstrumentation` automatically derives baseline labels from safe globals such as `utm_source`, query string, and referrer. If the app receives traffic from owned frontend, metasearch, paid search, partners, or backoffice flows and the real source is available in the parsed request data, resolve it once near the server span:
+
+```php
+use Elven\Observability\PhpLegacy\Attribution\TrafficSourceResolver;
+use Elven\Observability\PhpLegacy\Observability;
+
+$traffic = TrafficSourceResolver::attributesFromRequest($requestData, $_SERVER);
+
+Observability::metrics()->setRequestAttributes($traffic);
+$span->setAttributes($traffic);
+```
+
+Metrics emitted after `setRequestAttributes()` automatically include:
+
+- `traffic_source`, for example `front`, `skyscanner`, `google_flights`, `mundi`, `kayak`, `viajala`, `partner_offers`, `backend`, `other`, `unknown`
+- `traffic_channel`, for example `owned`, `metasearch`, `paid`, `partner`, `backoffice`, `unknown`
+
+Never use click ids, redirect ids, campaigns, order ids, session ids, full referrers, or raw partner values as metric labels. The resolver collapses unknown/high-cardinality-looking values to `other` or `unknown`.
 
 ## Step 5: Propagate Context To Outbound HTTP
 
@@ -398,6 +420,8 @@ Allowed metric labels:
 - `dependency_name`
 - `operation`
 - `error_type`
+- `traffic_source`
+- `traffic_channel`
 
 Never use request id, order id, user id, token, CPF, email, trace id, full URL, SQL statement, or object key as a metric label.
 
@@ -496,12 +520,13 @@ Collector unavailable:
 4. Call `Observability::init()` once near request start.
 5. Register `$otelHandle->shutdown()` with `register_shutdown_function()`.
 6. Wrap the central route/controller invocation with a stable server span.
-7. Wrap outbound HTTP, cURL, Guzzle, SOAP/WCF, DB, cache, queue, mail, storage, and search calls where useful.
-8. Add Monolog 1 processor plus `MonologOtlpHandler`, or custom `Observability::logs()->correlate($context)` / `Observability::logs()->emit(...)`.
-9. Add only low-cardinality business metrics.
-10. Validate staging before canary.
+7. Set traffic attribution with `TrafficSourceResolver` and `Observability::metrics()->setRequestAttributes(...)`.
+8. Wrap outbound HTTP, cURL, Guzzle, SOAP/WCF, DB, cache, queue, mail, storage, and search calls where useful.
+9. Add Monolog 1 processor plus `MonologOtlpHandler`, or custom `Observability::logs()->correlate($context)` / `Observability::logs()->emit(...)`.
+10. Add only low-cardinality business metrics.
+11. Validate staging before canary.
 
-Do not capture request/response bodies, XML payloads, raw SQL, tokens, cookies, Authorization headers, CPF/email/card values, raw user ids, or dynamic ids in metric labels.
+Do not capture request/response bodies, XML payloads, raw SQL, tokens, cookies, Authorization headers, CPF/email/card values, raw user ids, click ids, redirect ids, campaigns, or dynamic ids in metric labels.
 
 ## More Documentation
 
@@ -510,4 +535,5 @@ Do not capture request/response bodies, XML payloads, raw SQL, tokens, cookies, 
 - `docs/legacy-slim2-integration.md`
 - `docs/privacy.md`
 - `docs/performance.md`
+- `docs/traffic-attribution.md`
 - `docs/troubleshooting.md`

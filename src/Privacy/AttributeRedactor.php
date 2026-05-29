@@ -2,6 +2,7 @@
 
 namespace Elven\Observability\PhpLegacy\Privacy;
 
+use Elven\Observability\PhpLegacy\Attribution\TrafficSourceResolver;
 use Elven\Observability\PhpLegacy\Config\ObservabilityConfig;
 
 final class AttributeRedactor
@@ -117,6 +118,10 @@ final class AttributeRedactor
             if (UrlSanitizer::isHighCardinalityValue($value)) {
                 $value = '{id}';
             }
+        } elseif ($key === 'traffic_source') {
+            $value = TrafficSourceResolver::normalizeSource($value);
+        } elseif ($key === 'traffic_channel') {
+            $value = TrafficSourceResolver::normalizeChannel($value);
         }
         return substr($value, 0, 160);
     }

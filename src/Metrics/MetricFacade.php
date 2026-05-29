@@ -11,6 +11,7 @@ final class MetricFacade
     private $exporter;
     private $redactor;
     private $defaultAttributes;
+    private $requestAttributes;
     private $counters;
     private $histograms;
     private $gauges;
@@ -33,6 +34,8 @@ final class MetricFacade
         'dependency_name',
         'operation',
         'error_type',
+        'traffic_source',
+        'traffic_channel',
     );
 
     private static $defaultHistogramBounds = array(
@@ -60,6 +63,7 @@ final class MetricFacade
         $this->exporter = $exporter instanceof OtlpHttpJsonMetricExporter ? $exporter : null;
         $this->redactor = $redactor;
         $this->defaultAttributes = $defaultAttributes;
+        $this->requestAttributes = array();
         $this->enabled = (bool) $enabled;
         $this->maxPoints = (int) $maxPoints > 0 ? (int) $maxPoints : 512;
         $this->droppedMetricPoints = 0;
@@ -97,6 +101,26 @@ final class MetricFacade
             $this->gauges[$name] = new Gauge($this, $name);
         }
         return $this->gauges[$name];
+    }
+
+    public function setRequestAttributes(array $attributes)
+    {
+        $this->requestAttributes = $this->redactor->redactMetricLabels($attributes, self::$allowedLabels);
+    }
+
+    public function addRequestAttributes(array $attributes)
+    {
+        $this->setRequestAttributes(array_merge($this->requestAttributes, $attributes));
+    }
+
+    public function clearRequestAttributes()
+    {
+        $this->requestAttributes = array();
+    }
+
+    public function requestAttributes()
+    {
+        return $this->requestAttributes;
     }
 
     public function recordCounter($name, $value, array $attributes = array())
@@ -190,7 +214,7 @@ final class MetricFacade
 
     private function point($name, $type, array $attributes, $value)
     {
-        $attributes = array_merge($this->defaultAttributes, $attributes);
+        $attributes = array_merge($this->defaultAttributes, $this->requestAttributes, $attributes);
         $attributes = $this->redactor->redactMetricLabels($attributes, self::$allowedLabels);
         return array(
             'name' => $this->normalizeMetricName($name),
@@ -204,7 +228,10 @@ final class MetricFacade
 
     private function pointKey($name, array $attributes)
     {
-        $attributes = $this->redactor->redactMetricLabels(array_merge($this->defaultAttributes, $attributes), self::$allowedLabels);
+        $attributes = $this->redactor->redactMetricLabels(
+            array_merge($this->defaultAttributes, $this->requestAttributes, $attributes),
+            self::$allowedLabels
+        );
         ksort($attributes);
         $encoded = json_encode($attributes);
         if ($encoded === false) {
