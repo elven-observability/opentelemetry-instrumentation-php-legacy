@@ -82,8 +82,8 @@ final class HttpServerInstrumentation
      *                                       build the response in an object and only flush the
      *                                       status line after the handler returns (e.g. Slim 2),
      *                                       where http_response_code() is still 200 at this point.
-     *                                       Should return a positive int; falsy/invalid results
-     *                                       fall back to http_response_code().
+     *                                       Should return a valid HTTP status code (100-599);
+     *                                       falsy/invalid results fall back to http_response_code().
      */
     public static function instrument($route, callable $callback, $statusResolver = null)
     {
@@ -116,15 +116,33 @@ final class HttpServerInstrumentation
         if (is_callable($statusResolver)) {
             try {
                 $resolved = call_user_func($statusResolver);
-                if (is_numeric($resolved) && (int) $resolved > 0) {
-                    return (int) $resolved;
+                $status = self::normalizeStatusCode($resolved);
+                if ($status !== null) {
+                    return $status;
                 }
             } catch (\Throwable $e) {
                 // Telemetry must never break the request: fall back below.
             }
         }
         $status = function_exists('http_response_code') ? http_response_code() : 200;
-        return $status ? (int) $status : 200;
+        $status = self::normalizeStatusCode($status);
+        return $status !== null ? $status : 200;
+    }
+
+    /**
+     * @param mixed $status
+     * @return int|null
+     */
+    private static function normalizeStatusCode($status)
+    {
+        if (!is_numeric($status)) {
+            return null;
+        }
+        $status = (int) $status;
+        if ($status < 100 || $status > 599) {
+            return null;
+        }
+        return $status;
     }
 
     private static function scheme()

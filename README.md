@@ -65,7 +65,7 @@ Use this while Packagist registration is pending. No GitHub token is required be
 
 ```bash
 composer config repositories.elven-php-legacy vcs https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.3
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.4
 ```
 
 For application repos, commit this in `composer.json`:
@@ -79,7 +79,7 @@ For application repos, commit this in `composer.json`:
     }
   ],
   "require": {
-    "elven-observability/opentelemetry-instrumentation-php-legacy": "^0.3"
+    "elven-observability/opentelemetry-instrumentation-php-legacy": "^0.4"
   }
 }
 ```
@@ -101,7 +101,7 @@ For apps pinned to PHP `7.3.13`, keep the app's existing Composer platform:
 After the package is registered on Packagist, the app can use only:
 
 ```bash
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.3
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.4
 ```
 
 Then remove the temporary `repositories` block from `composer.json`.

@@ -115,4 +115,26 @@ final class VersionAndHttpStatusTest extends TestCase
         $attributes = $captured->attributes();
         self::assertSame(200, $attributes['http.response.status_code']);
     }
+
+    public function testInvalidResolverStatusFallsBackToHttpResponseCode(): void
+    {
+        if (function_exists('http_response_code')) {
+            http_response_code(418);
+        }
+
+        $captured = null;
+        HttpServerInstrumentation::instrument(
+            'GET /rest/v2/airport/search',
+            function ($span) use (&$captured) {
+                $captured = $span;
+                return 'handled';
+            },
+            function () {
+                return 999;
+            }
+        );
+
+        $attributes = $captured->attributes();
+        self::assertSame(418, $attributes['http.response.status_code']);
+    }
 }

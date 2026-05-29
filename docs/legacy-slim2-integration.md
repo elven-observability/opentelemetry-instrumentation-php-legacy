@@ -7,7 +7,7 @@ This guide shows how to integrate the library into a legacy PHP app that uses Sl
 Keep the target application's existing Composer platform constraint. This library supports `php >=7.3.13`.
 
 ```bash
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.3
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.4
 ```
 
 ## Environment
@@ -104,7 +104,7 @@ $result = RestRouteInstrumentation::traceRestAction(
 );
 ```
 
-The resolver runs when the span closes and must return a positive int. Invalid/falsy results and resolver exceptions fall back to `http_response_code()`, so telemetry never breaks the request. Slim re-applies the same status on `finalize()`, so the HTTP response itself is unchanged.
+The resolver runs when the span closes and must return a valid HTTP status code (100-599). Invalid/falsy results and resolver exceptions fall back to `http_response_code()`, so telemetry never breaks the request. Slim re-applies the same status on `finalize()`, so the HTTP response itself is unchanged.
 
 If you cannot pass a resolver, an equivalent workaround is to mirror the status into the global before the span closes, inside the closure after the handler returns:
 
