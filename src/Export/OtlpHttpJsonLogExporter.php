@@ -3,6 +3,7 @@
 namespace Elven\Observability\PhpLegacy\Export;
 
 use Elven\Observability\PhpLegacy\Config\ObservabilityConfig;
+use Elven\Observability\PhpLegacy\Observability;
 use Elven\Observability\PhpLegacy\Support\OtlpAttributes;
 
 final class OtlpHttpJsonLogExporter
@@ -34,7 +35,7 @@ final class OtlpHttpJsonLogExporter
                     'resource' => array('attributes' => OtlpAttributes::encode($this->resource)),
                     'scopeLogs' => array(
                         array(
-                            'scope' => array('name' => 'elven-observability-php-legacy', 'version' => '0.1.0'),
+                            'scope' => array('name' => Observability::SCOPE_NAME, 'version' => Observability::VERSION),
                             'logRecords' => $this->encodeRecords($records),
                         ),
                     ),

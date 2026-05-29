@@ -18,6 +18,17 @@ use Elven\Observability\PhpLegacy\Trace\Tracer;
 
 final class Observability
 {
+    /**
+     * Single source of truth for the library version reported in telemetry
+     * (resource attribute telemetry.sdk.version and the instrumentation scope
+     * version). Keep this in sync with the composer package version / git tag
+     * as part of the release checklist.
+     */
+    const VERSION = '0.4.0';
+
+    /** Instrumentation scope name reported on every exported signal. */
+    const SCOPE_NAME = 'elven-observability-php-legacy';
+
     private static $handle;
     private static $tracer;
     private static $metrics;

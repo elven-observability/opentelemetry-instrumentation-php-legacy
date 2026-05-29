@@ -3,6 +3,7 @@
 namespace Elven\Observability\PhpLegacy\Export;
 
 use Elven\Observability\PhpLegacy\Config\ObservabilityConfig;
+use Elven\Observability\PhpLegacy\Observability;
 use Elven\Observability\PhpLegacy\Support\OtlpAttributes;
 use Elven\Observability\PhpLegacy\Trace\Span;
 
@@ -42,7 +43,7 @@ final class OtlpHttpJsonTraceExporter
                     'resource' => array('attributes' => OtlpAttributes::encode($this->resource)),
                     'scopeSpans' => array(
                         array(
-                            'scope' => array('name' => 'elven-observability-php-legacy', 'version' => '0.1.0'),
+                            'scope' => array('name' => Observability::SCOPE_NAME, 'version' => Observability::VERSION),
                             'spans' => $encoded,
                         ),
                     ),

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0 - 2026-05-29
+
+- Centralized the reported library version in `Observability::VERSION` and the scope name in `Observability::SCOPE_NAME`; `ResourceBuilder` and the trace/metric/log OTLP exporters now read from these instead of a hardcoded `0.1.0`, so `telemetry.sdk.version` and the instrumentation scope version match the released package (fixes #1).
+- Added an optional `$statusResolver` callback to `HttpServerInstrumentation::instrument()` and `Bridge\Legacy\RestRouteInstrumentation::traceRestAction()`. Frameworks that flush the HTTP status after the handler returns (e.g. Slim 2, where `http_response_code()` is still `200` when the span closes) can pass a resolver such as `function () use ($app) { return $app->response->getStatus(); }` so the SERVER span and the `http.server.request.duration` metric record the real status. Falls back to `http_response_code()` when no resolver is given or it returns an invalid value; resolver exceptions never break the request (fixes #2).
+
 ## 0.3.0 - 2026-05-29
 
 - Added bounded traffic attribution through `Attribution\TrafficSourceResolver`.

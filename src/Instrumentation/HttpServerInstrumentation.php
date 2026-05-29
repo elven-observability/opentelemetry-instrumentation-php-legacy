@@ -72,7 +72,20 @@ final class HttpServerInstrumentation
         }
     }
 
-    public static function instrument($route, callable $callback)
+    /**
+     * Instrument an HTTP server request as a SERVER span.
+     *
+     * @param string        $route          Stable route template used as the span name suffix.
+     * @param callable      $callback       Receives the span and runs the request handler.
+     * @param callable|null $statusResolver Optional. Called when the span closes to obtain the
+     *                                       real HTTP status code. Required for frameworks that
+     *                                       build the response in an object and only flush the
+     *                                       status line after the handler returns (e.g. Slim 2),
+     *                                       where http_response_code() is still 200 at this point.
+     *                                       Should return a positive int; falsy/invalid results
+     *                                       fall back to http_response_code().
+     */
+    public static function instrument($route, callable $callback, $statusResolver = null)
     {
         $span = self::startFromGlobals($route);
         $start = microtime(true);
@@ -82,7 +95,7 @@ final class HttpServerInstrumentation
             $span->recordException($e);
             throw $e;
         } finally {
-            $status = function_exists('http_response_code') ? http_response_code() : 200;
+            $status = self::resolveStatus($statusResolver);
             Observability::metrics()->histogram('http.server.request.duration')->record((microtime(true) - $start) * 1000, array(
                 'route' => $route,
                 'method' => isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET',
@@ -90,6 +103,28 @@ final class HttpServerInstrumentation
             ));
             self::finish($span, $status);
         }
+    }
+
+    /**
+     * Resolve the response status, preferring an explicit resolver over http_response_code().
+     *
+     * @param callable|null $statusResolver
+     * @return int
+     */
+    private static function resolveStatus($statusResolver)
+    {
+        if (is_callable($statusResolver)) {
+            try {
+                $resolved = call_user_func($statusResolver);
+                if (is_numeric($resolved) && (int) $resolved > 0) {
+                    return (int) $resolved;
+                }
+            } catch (\Throwable $e) {
+                // Telemetry must never break the request: fall back below.
+            }
+        }
+        $status = function_exists('http_response_code') ? http_response_code() : 200;
+        return $status ? (int) $status : 200;
     }
 
     private static function scheme()

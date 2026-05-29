@@ -84,6 +84,39 @@ The resulting route is `/rest/v{version}/{controller}/{action}` and the server s
 
 Traffic labels are inherited by all metrics emitted after `setRequestAttributes()`, including server duration, dependency duration, exporter metrics, and business counters.
 
+### Recording the real HTTP status (Slim 2)
+
+Slim 2 sets the status on its `Response` object and only flushes it (via `header()`) during `$app->run()` / `Response::finalize()`, which runs **after** the route span closes. At that point `http_response_code()` is still `200`, so by default the SERVER span and the `http.server.request.duration` metric would record `200` even for `401`/`400`/`5xx` responses.
+
+Pass an optional status resolver as the 5th argument so the span reads the real status when it closes:
+
+```php
+$result = RestRouteInstrumentation::traceRestAction(
+    $version,
+    $controller,
+    $action,
+    function ($span) use ($serviceObject, $method, $requestData) {
+        return $serviceObject->$method($requestData);
+    },
+    function () use ($app) {
+        return $app->response->getStatus();
+    }
+);
+```
+
+The resolver runs when the span closes and must return a positive int. Invalid/falsy results and resolver exceptions fall back to `http_response_code()`, so telemetry never breaks the request. Slim re-applies the same status on `finalize()`, so the HTTP response itself is unchanged.
+
+If you cannot pass a resolver, an equivalent workaround is to mirror the status into the global before the span closes, inside the closure after the handler returns:
+
+```php
+$result = $serviceObject->$method($requestData);
+$status = $app->response->getStatus();
+if (is_int($status) && $status > 0 && !headers_sent()) {
+    http_response_code($status);
+}
+return $result;
+```
+
 ## Downstream HTTP, SOAP, WCF, Or Internal Wrappers
 
 Create the client span before injecting headers. This ensures the outbound `traceparent` uses the child span id, not the parent request span id.

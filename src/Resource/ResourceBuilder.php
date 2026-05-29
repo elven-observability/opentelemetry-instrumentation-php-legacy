@@ -3,6 +3,7 @@
 namespace Elven\Observability\PhpLegacy\Resource;
 
 use Elven\Observability\PhpLegacy\Config\ObservabilityConfig;
+use Elven\Observability\PhpLegacy\Observability;
 
 final class ResourceBuilder
 {
@@ -15,7 +16,7 @@ final class ResourceBuilder
         $attributes = array(
             'service.name' => $config->serviceName(),
             'service.version' => $config->serviceVersion(),
-            'telemetry.sdk.name' => 'elven-observability-php-legacy',
+            'telemetry.sdk.name' => Observability::SCOPE_NAME,
             'telemetry.sdk.language' => 'php',
             'telemetry.sdk.version' => self::version(),
             'process.runtime.name' => 'php',
@@ -37,6 +38,6 @@ final class ResourceBuilder
 
     public static function version()
     {
-        return '0.1.0';
+        return Observability::VERSION;
     }
 }
