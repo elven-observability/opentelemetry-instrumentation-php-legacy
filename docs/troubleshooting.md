@@ -58,6 +58,18 @@ $span->setAttributes($traffic);
 
 If the app passes only dynamic ids such as click id, redirect id, session id, or order id, the resolver will intentionally export `unknown`/`other` instead of the raw value. Map the app-specific source to stable categories such as `front`, `skyscanner`, `google_flights`, `mundi`, `kayak`, `viajala`, or `backend`.
 
+## Values are still redacted
+
+Library-side redaction is enabled by default. To disable it globally for customers that explicitly own redaction downstream:
+
+```bash
+ELVEN_OTEL_REDACTION_ENABLED=false
+```
+
+Also accepted: `off`, `0`, and `no`. Restart/reload PHP-FPM after changing environment variables so workers see the new value.
+
+This switch keeps span/log/header values raw, including DB statements passed to `DbInstrumentation::traceQuery()`. It does not disable metric label allowlists, metric label normalization, or high-cardinality collapse.
+
 ## `http/protobuf` configured
 
 This v1 library supports `http/json`. If `http/protobuf` is configured, telemetry is disabled safely. Change:

@@ -9,12 +9,14 @@ final class AttributeRedactor
 {
     const REDACTED = '[REDACTED]';
 
+    private $redactionEnabled;
     private $allowRaw;
     private $captureDbStatement;
     private $redactDbStatement;
 
     public function __construct(ObservabilityConfig $config)
     {
+        $this->redactionEnabled = $config->redactionEnabled();
         $this->allowRaw = array_flip($config->allowRawAttributes());
         $this->captureDbStatement = $config->captureDbStatement();
         $this->redactDbStatement = $config->redactDbStatement();
@@ -44,6 +46,9 @@ final class AttributeRedactor
 
     public function redactValue($key, $value)
     {
+        if (!$this->redactionEnabled) {
+            return $value;
+        }
         if (isset($this->allowRaw[$key])) {
             return $value;
         }
@@ -70,11 +75,19 @@ final class AttributeRedactor
 
     public function redactHeaders(array $headers)
     {
+        if (!$this->redactionEnabled) {
+            return $headers;
+        }
         $safe = array();
         foreach ($headers as $key => $value) {
             $safe[$key] = $this->isSensitiveKey($key) ? self::REDACTED : UrlSanitizer::redactSensitiveText((string) $value);
         }
         return $safe;
+    }
+
+    public function redactionEnabled()
+    {
+        return $this->redactionEnabled;
     }
 
     private function isDbStatementKey($key)
@@ -114,7 +127,9 @@ final class AttributeRedactor
             $value = preg_match('/^[1-5][0-9]{2}$/', $value) === 1 ? $value : 'unknown';
         } elseif (in_array($key, array('dependency_name', 'operation', 'error_type'), true)) {
             $value = UrlSanitizer::sanitizePath($value);
-            $value = UrlSanitizer::redactSensitiveText($value);
+            if ($this->redactionEnabled) {
+                $value = UrlSanitizer::redactSensitiveText($value);
+            }
             if (UrlSanitizer::isHighCardinalityValue($value)) {
                 $value = '{id}';
             }

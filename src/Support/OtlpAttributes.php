@@ -43,6 +43,15 @@ final class OtlpAttributes
             }
             return array('arrayValue' => array('values' => $values));
         }
+        if (is_object($value)) {
+            if (method_exists($value, '__toString')) {
+                return array('stringValue' => (string) $value);
+            }
+            return array('stringValue' => '[object ' . get_class($value) . ']');
+        }
+        if (is_resource($value)) {
+            return array('stringValue' => '[resource ' . get_resource_type($value) . ']');
+        }
         return array('stringValue' => (string) $value);
     }
 }

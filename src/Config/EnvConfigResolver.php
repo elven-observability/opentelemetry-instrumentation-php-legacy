@@ -77,6 +77,7 @@ final class EnvConfigResolver
             'sampler' => self::string($explicit, 'sampler', self::env('OTEL_TRACES_SAMPLER', 'parentbased_traceidratio')),
             'sampler_arg' => self::float($explicit, 'sampler_arg', self::env('OTEL_TRACES_SAMPLER_ARG', '1'), 0.0, 1.0),
             'log_correlation_enabled' => self::bool($explicit, 'log_correlation_enabled', self::env('ELVEN_OTEL_LOG_CORRELATION_ENABLED', 'true')),
+            'redaction_enabled' => self::bool($explicit, 'redaction_enabled', self::env('ELVEN_OTEL_REDACTION_ENABLED', 'true')),
             'capture_db_statement' => self::bool($explicit, 'capture_db_statement', self::env('ELVEN_OTEL_CAPTURE_DB_STATEMENT', 'false')),
             'redact_db_statement' => self::bool($explicit, 'redact_db_statement', self::env('ELVEN_OTEL_REDACT_DB_STATEMENT', 'true')),
             'allow_raw_attributes' => self::listValue(self::string($explicit, 'allow_raw_attributes', self::env('ELVEN_OTEL_ALLOW_RAW_ATTRIBUTES', ''))),

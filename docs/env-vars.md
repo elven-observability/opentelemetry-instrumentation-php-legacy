@@ -60,6 +60,7 @@ The PHP app sends OTLP logs to the OpenTelemetry Collector, not directly to Loki
 
 | Variable | Default | Notes |
 | --- | --- | --- |
+| `ELVEN_OTEL_REDACTION_ENABLED` | `true` | Global library-side redaction switch. Set to `false`, `off`, `0`, or `no` only when the customer explicitly owns redaction in the Collector/backend. This does not disable metric label allowlists/cardinality guardrails. |
 | `ELVEN_OTEL_CAPTURE_DB_STATEMENT` | `false` | Raw statement capture is off. |
 | `ELVEN_OTEL_REDACT_DB_STATEMENT` | `true` | Sanitizes statements if capture is enabled. |
 | `ELVEN_OTEL_ALLOW_RAW_ATTRIBUTES` | empty | Explicit allowlist for controlled troubleshooting. |

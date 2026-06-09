@@ -26,6 +26,7 @@ final class ObservabilityConfig
     private $sampler;
     private $samplerArg;
     private $logCorrelationEnabled;
+    private $redactionEnabled;
     private $captureDbStatement;
     private $redactDbStatement;
     private $allowRawAttributes;
@@ -58,6 +59,7 @@ final class ObservabilityConfig
         $this->sampler = (string) $values['sampler'];
         $this->samplerArg = (float) $values['sampler_arg'];
         $this->logCorrelationEnabled = (bool) $values['log_correlation_enabled'];
+        $this->redactionEnabled = (bool) $values['redaction_enabled'];
         $this->captureDbStatement = (bool) $values['capture_db_statement'];
         $this->redactDbStatement = (bool) $values['redact_db_statement'];
         $this->allowRawAttributes = (array) $values['allow_raw_attributes'];
@@ -177,6 +179,11 @@ final class ObservabilityConfig
         return $this->logCorrelationEnabled;
     }
 
+    public function redactionEnabled()
+    {
+        return $this->redactionEnabled;
+    }
+
     public function captureDbStatement()
     {
         return $this->captureDbStatement;
@@ -241,6 +248,7 @@ final class ObservabilityConfig
             'sampler' => $this->sampler,
             'sampler_arg' => $this->samplerArg,
             'log_correlation_enabled' => $this->logCorrelationEnabled,
+            'redaction_enabled' => $this->redactionEnabled,
             'capture_db_statement' => $this->captureDbStatement,
             'redact_db_statement' => $this->redactDbStatement,
             'allow_raw_attributes' => $this->allowRawAttributes,

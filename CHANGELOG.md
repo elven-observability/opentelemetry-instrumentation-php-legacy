@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 - 2026-06-09
+
+- Added `ELVEN_OTEL_REDACTION_ENABLED` and explicit `redaction_enabled` config to disable library-side value redaction globally when a customer owns privacy controls downstream.
+- Kept redaction enabled by default and preserved metric label allowlists, normalization, truncation, and high-cardinality protection even when value redaction is disabled.
+- Updated README, environment docs, privacy docs, Slim 2 guide, troubleshooting, and tests for the new redaction opt-out behavior.
+
 ## 0.4.0 - 2026-05-29
 
 - Centralized the reported library version in `Observability::VERSION` and the scope name in `Observability::SCOPE_NAME`; `ResourceBuilder` and the trace/metric/log OTLP exporters now read from these instead of a hardcoded `0.1.0`, so `telemetry.sdk.version` and the instrumentation scope version match the released package (fixes #1).

@@ -190,7 +190,7 @@ final class LogsFacade
 
     private function sanitizeValue($key, $value, $depth)
     {
-        if ($this->redactor && $this->isSensitiveKey($key)) {
+        if ($this->redactionEnabled() && $this->redactor && $this->isSensitiveKey($key)) {
             return AttributeRedactor::REDACTED;
         }
 
@@ -214,6 +214,9 @@ final class LogsFacade
         if (is_bool($safe) || is_int($safe) || is_float($safe)) {
             return $safe;
         }
+        if (!$this->redactionEnabled()) {
+            return (string) $safe;
+        }
         return UrlSanitizer::redactSensitiveText((string) $safe);
     }
 
@@ -235,7 +238,18 @@ final class LogsFacade
         if ($json === false) {
             return '[array]';
         }
+        if (!$this->redactionEnabled()) {
+            return $json;
+        }
         return UrlSanitizer::redactSensitiveText($json);
+    }
+
+    private function redactionEnabled()
+    {
+        if ($this->redactor && method_exists($this->redactor, 'redactionEnabled')) {
+            return $this->redactor->redactionEnabled();
+        }
+        return true;
     }
 
     private function prefixAttributes($prefix, array $attributes)

@@ -69,6 +69,26 @@ final class LogsAndInstrumentationTest extends TestCase
         self::assertSame('[REDACTED]', $records[0]['attributes']['log.context.password']);
     }
 
+    public function testLogExportCanKeepRawValuesWhenRedactionIsDisabled(): void
+    {
+        Env::reset();
+        putenv('OTEL_TRACES_EXPORTER=none');
+        putenv('OTEL_METRICS_EXPORTER=none');
+        putenv('OTEL_LOGS_EXPORTER=otlp');
+        putenv('ELVEN_OTEL_REDACTION_ENABLED=false');
+        Observability::init(array('service_name' => 'log-export-raw-test'));
+
+        $logger = new Logger('legacy');
+        $logger->pushHandler(new MonologOtlpHandler());
+        $logger->warning('login failed for test@example.com', array('password' => 'secret'));
+
+        $records = $this->drainLogRecords(Observability::logs());
+
+        self::assertCount(1, $records);
+        self::assertStringContainsString('test@example.com', $records[0]['body']);
+        self::assertSame('secret', $records[0]['attributes']['log.context.password']);
+    }
+
     public function testLogRecordLimitDropsExcessRecords(): void
     {
         Env::reset();

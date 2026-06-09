@@ -64,6 +64,17 @@ final class ConfigTest extends TestCase
         self::assertStringContainsString('ELVEN_OTEL_ENABLED=false', $config->disabledReason());
     }
 
+    public function testRedactionCanBeDisabledByEnvironmentOrExplicitConfig(): void
+    {
+        putenv('ELVEN_OTEL_REDACTION_ENABLED=off');
+
+        $config = EnvConfigResolver::resolve();
+        self::assertFalse($config->redactionEnabled());
+
+        $config = EnvConfigResolver::resolve(array('redaction_enabled' => true));
+        self::assertTrue($config->redactionEnabled());
+    }
+
     public function testReservedResourceAttributesCannotOverrideExplicitIdentity(): void
     {
         putenv('OTEL_RESOURCE_ATTRIBUTES=service.name=wrong,deployment.environment.name=wrong,team=payments');

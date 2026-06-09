@@ -45,6 +45,28 @@ final class OtlpEncodingTest extends TestCase
         self::assertSame($root->context()->spanId(), $payload['resourceSpans'][0]['scopeSpans'][0]['spans'][0]['parentSpanId']);
     }
 
+    public function testTracePayloadDoesNotFailOnObjectAttributesWhenRedactionIsDisabled(): void
+    {
+        $config = EnvConfigResolver::resolve(array(
+            'service_name' => 'legacy-test',
+            'redaction_enabled' => false,
+        ));
+        $resource = ResourceBuilder::build($config);
+        $redactor = new AttributeRedactor($config);
+        $metrics = new MetricFacade(null, $redactor);
+        $processor = new SpanProcessor(null, $metrics, 128);
+        $tracer = new Tracer(new ParentBasedTraceIdRatioSampler(1.0), $processor, $redactor, SpanContext::invalid());
+
+        $span = $tracer->startSpan('object-attribute');
+        $span->setAttribute('legacy.object', new \stdClass());
+        $span->end();
+
+        $payload = (new OtlpHttpJsonTraceExporter($config, $resource))->payload(array($span));
+        $attributes = $payload['resourceSpans'][0]['scopeSpans'][0]['spans'][0]['attributes'];
+
+        self::assertSame('[object stdClass]', $this->attributeValue($attributes, 'legacy.object'));
+    }
+
     public function testMetricPayloadContainsCounterAndHistogram(): void
     {
         $config = EnvConfigResolver::resolve(array('service_name' => 'legacy-test'));

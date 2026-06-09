@@ -14,7 +14,7 @@ This library is for PHP apps that cannot safely use the official OpenTelemetry P
 - Can send Monolog/custom application logs to the OpenTelemetry Collector so the Collector can route them to Loki.
 - Emits low-cardinality request, dependency, exporter, and business metrics.
 - Adds bounded traffic attribution labels, such as `traffic_source=skyscanner` and `traffic_channel=metasearch`.
-- Redacts sensitive attributes by default.
+- Redacts sensitive attributes by default, with an explicit global opt-out for customers that own downstream redaction.
 - Drops excessive spans, metric points, and log records per request instead of growing unbounded memory.
 
 ## Safe Defaults
@@ -31,8 +31,8 @@ Default behavior is intentionally conservative:
 - Max OTLP log records per request: `512`.
 - Monolog/custom log correlation: enabled.
 - OTLP logs exporter: disabled unless `OTEL_LOGS_EXPORTER=otlp` is set, to avoid accidentally duplicating an existing log pipeline.
-- Payload, body, XML, cookies, tokens, passwords, Authorization, raw user id, and raw SQL capture: disabled.
-- DB spans include `db.query.summary`; raw `db.statement` is redacted unless explicitly enabled.
+- Payload, body, XML, cookies, tokens, passwords, Authorization, raw user id, and raw SQL capture: redacted or disabled.
+- DB spans include `db.query.summary`; raw `db.statement` is redacted unless redaction is explicitly disabled.
 
 Set this at any time to turn the whole library into no-op:
 
@@ -65,7 +65,7 @@ Use this while Packagist registration is pending. No GitHub token is required be
 
 ```bash
 composer config repositories.elven-php-legacy vcs https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.4
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.5
 ```
 
 For application repos, commit this in `composer.json`:
@@ -79,7 +79,7 @@ For application repos, commit this in `composer.json`:
     }
   ],
   "require": {
-    "elven-observability/opentelemetry-instrumentation-php-legacy": "^0.4"
+    "elven-observability/opentelemetry-instrumentation-php-legacy": "^0.5"
   }
 }
 ```
@@ -101,7 +101,7 @@ For apps pinned to PHP `7.3.13`, keep the app's existing Composer platform:
 After the package is registered on Packagist, the app can use only:
 
 ```bash
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.4
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.5
 ```
 
 Then remove the temporary `repositories` block from `composer.json`.
@@ -132,6 +132,7 @@ OTEL_METRICS_EXPORTER=otlp
 OTEL_LOGS_EXPORTER=otlp
 ELVEN_OTEL_LOG_CORRELATION_ENABLED=true
 
+ELVEN_OTEL_REDACTION_ENABLED=true
 ELVEN_OTEL_CAPTURE_DB_STATEMENT=false
 ELVEN_OTEL_REDACT_DB_STATEMENT=true
 ELVEN_OTEL_ALLOW_RAW_ATTRIBUTES=
@@ -339,18 +340,29 @@ Default DB telemetry:
 - `db.query.summary`, for example `SELECT tickets`
 - redacted `db.statement`
 
-For controlled troubleshooting with sanitized SQL:
+For controlled troubleshooting with sanitized SQL while keeping global redaction on:
 
 ```bash
 ELVEN_OTEL_CAPTURE_DB_STATEMENT=true
 ELVEN_OTEL_REDACT_DB_STATEMENT=true
 ```
 
-Do not use this in production without explicit written approval:
+For customers that explicitly do not want library-side redaction and own the privacy control in the Collector/backend:
 
 ```bash
+ELVEN_OTEL_REDACTION_ENABLED=false
+```
+
+Accepted false values are `false`, `off`, `0`, and `no`. This keeps span/log/header values raw, including `db.statement` when the application passes SQL into `DbInstrumentation::traceQuery()`.
+
+Do not use either of these production settings without explicit written approval:
+
+```bash
+ELVEN_OTEL_REDACTION_ENABLED=false
 ELVEN_OTEL_REDACT_DB_STATEMENT=false
 ```
+
+`ELVEN_OTEL_REDACTION_ENABLED=false` does not disable metric label allowlists, route/status normalization, or high-cardinality collapse. Metrics still reject labels such as request id, order id, user id, token, CPF/email, session id, and trace id.
 
 ## Step 7: Add Logs For Loki Via Collector
 
@@ -465,8 +477,8 @@ Before canary:
 - Logs contain `trace_id` and `span_id`.
 - If `OTEL_LOGS_EXPORTER=otlp`, the Collector receives `/v1/logs` and Loki receives the routed entries.
 - DB spans contain `db.query.summary`.
-- Raw SQL remains redacted unless controlled troubleshooting envs are enabled.
-- Fake JWT, bearer token, cookie, CPF, email, card, and SQL literals are redacted.
+- With default privacy, raw SQL remains redacted and fake JWT, bearer token, cookie, CPF, email, card, and SQL literals are redacted.
+- If `ELVEN_OTEL_REDACTION_ENABLED=false` is intentionally enabled, raw values appear in spans/logs but metric labels remain low-cardinality and allowlisted.
 - Tempo receives traces.
 - Mimir/Prometheus receives metrics.
 - Loki logs can be correlated by `trace_id`.

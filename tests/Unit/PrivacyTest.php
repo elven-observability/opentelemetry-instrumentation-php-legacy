@@ -49,4 +49,35 @@ final class PrivacyTest extends TestCase
             'traffic_source' => 'Google Flights',
         ), array('traffic_source'))['traffic_source']);
     }
+
+    public function testGlobalRedactionOffLeavesSpanLogAndHeaderValuesRaw(): void
+    {
+        $redactor = new AttributeRedactor(EnvConfigResolver::resolve(array('redaction_enabled' => false)));
+
+        self::assertSame('Bearer secret', $redactor->redactValue('http.request.header.authorization', 'Bearer secret'));
+        self::assertSame('42', $redactor->redactValue('user.id', '42'));
+        self::assertSame('select * from users where email="a@example.com"', $redactor->redactValue(
+            'db.statement',
+            'select * from users where email="a@example.com"'
+        ));
+        self::assertSame('SQL failed for a@example.com', $redactor->redactValue(
+            'exception.message',
+            'SQL failed for a@example.com'
+        ));
+        self::assertSame(array('Authorization' => 'Bearer secret'), $redactor->redactHeaders(array(
+            'Authorization' => 'Bearer secret',
+        )));
+    }
+
+    public function testGlobalRedactionOffDoesNotDisableMetricLabelAllowlist(): void
+    {
+        $redactor = new AttributeRedactor(EnvConfigResolver::resolve(array('redaction_enabled' => false)));
+        $labels = $redactor->redactMetricLabels(array(
+            'operation' => 'order-ABCD1234EFGH5678',
+            'request_id' => 'must-not-leak',
+        ), array('operation'));
+
+        self::assertSame('{id}', $labels['operation']);
+        self::assertArrayNotHasKey('request_id', $labels);
+    }
 }

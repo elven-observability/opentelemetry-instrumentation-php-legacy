@@ -18,7 +18,7 @@ The library is intentionally small and explicit:
 - `Export\OtlpHttpJsonTraceExporter`, `Export\OtlpHttpJsonMetricExporter`, and `Export\OtlpHttpJsonLogExporter` encode OTLP JSON and send HTTP POSTs to Collector endpoints.
 - `Metrics\MetricFacade` provides counters, histograms, and gauges with low-cardinality label enforcement.
 - `Logs\MonologTraceProcessor` adds correlation fields to existing logs, while `Logs\MonologOtlpHandler` and `Logs\LogsFacade` can emit bounded OTLP log records.
-- `Privacy` classes redact sensitive attributes, URLs, and DB statements.
+- `Privacy` classes redact sensitive attributes, URLs, and DB statements by default, with an explicit customer-owned opt-out switch.
 - `Instrumentation` classes provide manual opt-in wrappers for HTTP server/client, cURL, Guzzle, SOAP/WCF, DB, Redis, Memcached, Mongo, AMQP, mail, AWS, and search clients.
 
 ## Lifecycle
@@ -37,7 +37,7 @@ The app should export to a customer/local Collector. The application does not ne
 
 The library never captures request bodies, response bodies, SOAP XML, raw message payloads, raw Redis keys, raw Mongo queries, raw Elasticsearch queries, or raw DB statements by default.
 
-Sensitive headers, paths, query values, exception messages, log body text, log attributes, and baggage values are redacted before storage/export. Explicit user identifiers are hashed. Metric labels are allowlisted, normalized, and bounded to prevent accidental cardinality explosions.
+Sensitive headers, paths, query values, exception messages, log body text, log attributes, and baggage values are redacted before storage/export. Explicit user identifiers are hashed. `ELVEN_OTEL_REDACTION_ENABLED=false` deliberately disables library-side value redaction for customers that own redaction and access control downstream. Metric labels are always allowlisted, normalized, and bounded to prevent accidental cardinality explosions, even when value redaction is disabled.
 
 Traffic attribution is intentionally categorical. Values such as click ids, redirect ids, session ids, campaigns, raw referrers, or partner payload ids are never valid metric labels; applications should resolve those to stable categories before calling `MetricFacade::setRequestAttributes()`.
 

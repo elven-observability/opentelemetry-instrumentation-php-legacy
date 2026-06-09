@@ -44,6 +44,26 @@ Do not log request/response bodies, SOAP XML, customer payloads, raw user identi
 
 `db.statement`, `db.query.text`, `db.sql.text`, and parameter attributes are redacted by default. If statement capture is explicitly enabled, literals and numeric parameters are replaced with `?`, and a safe `db.query.summary` is produced.
 
+## Global Redaction Opt-Out
+
+Default redaction is controlled by:
+
+```bash
+ELVEN_OTEL_REDACTION_ENABLED=true
+```
+
+Customers that do not want library-side redaction can explicitly disable it:
+
+```bash
+ELVEN_OTEL_REDACTION_ENABLED=false
+```
+
+Accepted false values are `false`, `off`, `0`, and `no`. When disabled, span attributes, log bodies, log attributes, headers passed to `AttributeRedactor::redactHeaders()`, exception messages, user identifiers, and `db.statement` values are kept raw. This is intended only for environments where the customer has made a conscious privacy decision and owns redaction, retention, and access control in the Collector and backend.
+
+This switch does not disable metric label safety. Metric labels are still allowlisted, normalized, truncated, and protected against high-cardinality values because unsafe labels can break a multi-tenant metrics backend even when the customer accepts raw span/log values.
+
+This switch also does not remove log exporter structural limits: very large log values are still truncated, arrays are bounded, and objects/exceptions are represented safely instead of being fully serialized.
+
 ## Metric Labels
 
 Only these labels are accepted: `service_name`, `service_namespace`, `environment`, `route`, `method`, `status_code`, `dependency_type`, `dependency_name`, `operation`, `error_type`, `traffic_source`, `traffic_channel`.
