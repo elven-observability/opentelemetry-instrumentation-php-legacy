@@ -54,6 +54,20 @@ final class ConfigTest extends TestCase
         self::assertSame(3, $config->maxLogRecordsPerRequest());
     }
 
+    public function testEmptySignalSpecificEndpointsFallBackToBaseEndpoint(): void
+    {
+        putenv('OTEL_EXPORTER_OTLP_ENDPOINT=http://collector.local:4318');
+        putenv('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=');
+        putenv('OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=');
+        putenv('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=');
+
+        $config = EnvConfigResolver::resolve();
+
+        self::assertSame('http://collector.local:4318/v1/traces', $config->tracesEndpoint());
+        self::assertSame('http://collector.local:4318/v1/metrics', $config->metricsEndpoint());
+        self::assertSame('http://collector.local:4318/v1/logs', $config->logsEndpoint());
+    }
+
     public function testEnvironmentKillSwitchWinsOverExplicitEnable(): void
     {
         putenv('ELVEN_OTEL_ENABLED=false');

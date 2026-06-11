@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 - 2026-06-11
+
+- Fixed environment resolution so empty `OTEL_*`/`ELVEN_*` variables are treated as unset. This matches OpenTelemetry environment-variable semantics and prevents PHP-FPM pool allowlists from exporting to an empty URL when signal-specific OTLP endpoints are declared but not set.
+- Added regression coverage for empty signal-specific OTLP endpoints falling back to `OTEL_EXPORTER_OTLP_ENDPOINT`.
+
 ## 0.5.0 - 2026-06-09
 
 - Added `ELVEN_OTEL_REDACTION_ENABLED` and explicit `redaction_enabled` config to disable library-side value redaction globally when a customer owns privacy controls downstream.

@@ -121,13 +121,13 @@ final class EnvConfigResolver
     private static function env($name, $default = null)
     {
         $value = getenv($name);
-        if ($value !== false) {
+        if ($value !== false && $value !== '') {
             return $value;
         }
-        if (isset($_ENV[$name])) {
+        if (isset($_ENV[$name]) && $_ENV[$name] !== '') {
             return $_ENV[$name];
         }
-        if (isset($_SERVER[$name])) {
+        if (isset($_SERVER[$name]) && $_SERVER[$name] !== '') {
             return $_SERVER[$name];
         }
         return $default;
