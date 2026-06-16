@@ -51,6 +51,30 @@ final class TrafficSourceResolverTest extends TestCase
         self::assertSame('other', TrafficSourceResolver::normalizeSource('0123456789abcdef0123456789abcdef'));
     }
 
+    public function testResolvesMetasearchFromSafePresenceOnlySignals(): void
+    {
+        self::assertSame(array(
+            'traffic_source' => 'skyscanner',
+            'traffic_channel' => 'metasearch',
+        ), TrafficSourceResolver::attributesFromRequest(array(
+            'skyScannerCode' => 'dynamic-code-not-exported',
+        )));
+
+        self::assertSame(array(
+            'traffic_source' => 'skyscanner',
+            'traffic_channel' => 'metasearch',
+        ), TrafficSourceResolver::attributesFromRequest(array(), array(
+            'REQUEST_URI' => '/rest/v2/aerial/search?skyScannerCode=dynamic-code-not-exported',
+        )));
+
+        self::assertSame(array(
+            'traffic_source' => 'google',
+            'traffic_channel' => 'paid',
+        ), TrafficSourceResolver::attributesFromRequest(array(), array(
+            'REQUEST_URI' => '/rest/v2/aerial/search?gclid=dynamic-click-id-not-exported',
+        )));
+    }
+
     public function testFallsBackToQueryStringAndHeaders(): void
     {
         self::assertSame(array(

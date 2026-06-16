@@ -141,7 +141,22 @@ final class TrafficSourceResolver
                 $fallback = 'other';
             }
         }
-        if (self::value($request, array('gclid', 'gbraid', 'wbraid')) !== null) {
+        if (self::value($request, array(
+            'skyScannerCode',
+            'skyscannerCode',
+            'sky_scanner_code',
+            'SkyScannerCode',
+        )) !== null || self::queryValue($server, array(
+            'skyScannerCode',
+            'skyscannerCode',
+            'sky_scanner_code',
+            'SkyScannerCode',
+        )) !== null) {
+            return 'skyscanner';
+        }
+        if (self::value($request, array('gclid', 'gbraid', 'wbraid')) !== null
+            || self::queryValue($server, array('gclid', 'gbraid', 'wbraid')) !== null
+        ) {
             return 'google';
         }
         return $fallback ?: 'unknown';

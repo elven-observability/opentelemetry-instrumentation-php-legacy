@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 - 2026-06-16
+
+- Added traffic-attribution fallback for presence-only metasearch signals such as `skyScannerCode` and `gclid` in request data or query strings.
+- Preserved low-cardinality behavior: dynamic click codes are never exported as metric labels, only mapped to stable sources such as `skyscanner` or `google`.
+- Added regression tests for safe presence-only attribution.
+
 ## 0.5.1 - 2026-06-11
 
 - Fixed environment resolution so empty `OTEL_*`/`ELVEN_*` variables are treated as unset. This matches OpenTelemetry environment-variable semantics and prevents PHP-FPM pool allowlists from exporting to an empty URL when signal-specific OTLP endpoints are declared but not set.
