@@ -9,35 +9,59 @@ final class HttpJsonClient
     private $headers;
     private $timeoutMillis;
     private $circuitBreaker;
+    private static $sharedCircuitBreakers = array();
 
     public function __construct(array $headers, $timeoutMillis, CircuitBreaker $circuitBreaker = null)
     {
         $this->headers = $headers;
         $this->timeoutMillis = (int) $timeoutMillis;
-        $this->circuitBreaker = $circuitBreaker ?: new CircuitBreaker();
+        $this->circuitBreaker = $circuitBreaker;
     }
 
     public function post($url, array $payload)
     {
-        if (!$this->circuitBreaker->allowRequest()) {
+        $circuitBreaker = $this->circuitBreaker ?: self::sharedCircuitBreaker($url);
+        if (!$circuitBreaker->allowRequest()) {
             return false;
         }
 
         try {
             $json = json_encode($payload);
             if ($json === false) {
-                $this->circuitBreaker->recordFailure();
+                $circuitBreaker->recordFailure();
                 return false;
             }
             $ok = function_exists('curl_init')
                 ? $this->postWithCurl($url, $json)
                 : $this->postWithStream($url, $json);
-            $ok ? $this->circuitBreaker->recordSuccess() : $this->circuitBreaker->recordFailure();
+            $ok ? $circuitBreaker->recordSuccess() : $circuitBreaker->recordFailure();
             return $ok;
         } catch (\Throwable $e) {
-            $this->circuitBreaker->recordFailure();
+            $circuitBreaker->recordFailure();
             return false;
         }
+    }
+
+    private static function sharedCircuitBreaker($url)
+    {
+        $key = self::circuitBreakerKey($url);
+        if (!isset(self::$sharedCircuitBreakers[$key])) {
+            self::$sharedCircuitBreakers[$key] = new CircuitBreaker();
+        }
+        return self::$sharedCircuitBreakers[$key];
+    }
+
+    private static function circuitBreakerKey($url)
+    {
+        $parts = @parse_url((string) $url);
+        if (!is_array($parts)) {
+            return (string) $url;
+        }
+        $scheme = isset($parts['scheme']) ? strtolower((string) $parts['scheme']) : 'http';
+        $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
+        $port = isset($parts['port']) ? ':' . (string) $parts['port'] : '';
+        $path = isset($parts['path']) ? (string) $parts['path'] : '';
+        return $scheme . '://' . $host . $port . $path;
     }
 
     private function postWithCurl($url, $json)

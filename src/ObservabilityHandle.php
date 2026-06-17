@@ -48,11 +48,10 @@ final class ObservabilityHandle
         if ($this->shutdown) {
             return true;
         }
+        $this->shutdown = true;
         try {
             $this->metrics->gauge('elven.php.request.memory.peak')->set(memory_get_peak_usage(true));
-            $ok = $this->forceFlush();
-            $this->shutdown = $ok;
-            return $ok;
+            return $this->forceFlush();
         } catch (\Throwable $e) {
             return false;
         } finally {

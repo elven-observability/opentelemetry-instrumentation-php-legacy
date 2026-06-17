@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3 - 2026-06-17
+
+- Hardened exporter failure paths for production rollouts: `ObservabilityHandle::shutdown()` is now idempotent even when an export fails, preventing duplicate shutdown flush attempts in applications that also register their own shutdown callback.
+- Changed OTLP HTTP circuit breakers to be shared per worker and endpoint instead of being recreated for every exporter instance, so a temporarily unavailable Collector is skipped quickly after repeated failures.
+
 ## 0.5.2 - 2026-06-16
 
 - Added traffic-attribution fallback for presence-only metasearch signals such as `skyScannerCode` and `gclid` in request data or query strings.

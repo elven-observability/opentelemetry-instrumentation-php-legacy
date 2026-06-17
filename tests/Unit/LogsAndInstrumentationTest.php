@@ -173,6 +173,24 @@ final class LogsAndInstrumentationTest extends TestCase
         self::assertSame($context, Observability::logs()->correlate($context));
     }
 
+    public function testShutdownIsIdempotentWhenExporterFails(): void
+    {
+        Env::reset();
+        Observability::resetForTests();
+        putenv('OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:9');
+        putenv('ELVEN_OTEL_EXPORT_TIMEOUT_MS=1');
+        putenv('OTEL_TRACES_EXPORTER=otlp');
+        putenv('OTEL_METRICS_EXPORTER=none');
+        putenv('OTEL_LOGS_EXPORTER=none');
+
+        $handle = Observability::init(array('service_name' => 'shutdown-idempotency-test'));
+        Observability::tracer()->withSpan('export-will-fail', function () {
+        });
+
+        self::assertFalse($handle->shutdown());
+        self::assertTrue($handle->shutdown());
+    }
+
     public function testSlim2StableRoute(): void
     {
         self::assertSame('/rest/v14/ticket/search', Slim2Instrumentation::restRoute('14', 'Ticket', 'Search'));
