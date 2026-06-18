@@ -50,6 +50,45 @@ final class PrivacyTest extends TestCase
         ), array('traffic_source'))['traffic_source']);
     }
 
+    public function testKeyPlanMemoizationStillScansEachValueAndStaysConsistent(): void
+    {
+        $redactor = new AttributeRedactor(EnvConfigResolver::resolve());
+
+        // A non-special ("scan") key must be re-scanned for every value, not
+        // cached by value — only the per-key plan is memoized.
+        self::assertSame('clean-route', $redactor->redactValue('custom.note', 'clean-route'));
+        self::assertSame('[REDACTED_JWT]', $redactor->redactValue('custom.note', 'eyJhbGci.eyJpc3M.SflKxw'));
+        self::assertSame('user a [REDACTED_EMAIL] paid', $redactor->redactValue('custom.note', 'user a a@example.com paid'));
+        self::assertSame('clean-again', $redactor->redactValue('custom.note', 'clean-again'));
+
+        // A sensitive key stays redacted across repeated calls (cache must not corrupt).
+        self::assertSame('[REDACTED]', $redactor->redactValue('password', 'first'));
+        self::assertSame('[REDACTED]', $redactor->redactValue('password', 'second'));
+
+        // User-id key keeps hashing (stable, non-raw) on repeated calls.
+        $h1 = $redactor->redactValue('user.id', '42');
+        $h2 = $redactor->redactValue('user.id', '42');
+        self::assertSame($h1, $h2);
+        self::assertNotSame('42', $h1);
+    }
+
+    public function testRedactSensitiveTextPreGatesPreserveDetection(): void
+    {
+        // Mixed-case Bearer, embedded JWT, email, CPF and card must still be caught
+        // after the cheap substring pre-checks.
+        self::assertSame('Bearer [REDACTED]', UrlSanitizer::redactSensitiveText('bEaReR abc.def-123'));
+        self::assertStringContainsString('[REDACTED_JWT]', UrlSanitizer::redactSensitiveText('t eyJa.eyJb.sig x'));
+        self::assertStringContainsString('[REDACTED_EMAIL]', UrlSanitizer::redactSensitiveText('mail a@b.co here'));
+        self::assertStringContainsString('[REDACTED_CPF]', UrlSanitizer::redactSensitiveText('doc 123.456.789-10'));
+        self::assertStringContainsString('[REDACTED_CARD]', UrlSanitizer::redactSensitiveText('pan 4111 1111 1111 1111'));
+
+        // Clean values (incl. ones with short digit runs) are returned untouched.
+        self::assertSame('kontik-zupper-api-v14', UrlSanitizer::redactSensitiveText('kontik-zupper-api-v14'));
+        self::assertSame('/rest/v2/aerial/search', UrlSanitizer::redactSensitiveText('/rest/v2/aerial/search'));
+        self::assertSame('status-200', UrlSanitizer::redactSensitiveText('status-200'));
+        self::assertSame('', UrlSanitizer::redactSensitiveText(''));
+    }
+
     public function testGlobalRedactionOffLeavesSpanLogAndHeaderValuesRaw(): void
     {
         $redactor = new AttributeRedactor(EnvConfigResolver::resolve(array('redaction_enabled' => false)));

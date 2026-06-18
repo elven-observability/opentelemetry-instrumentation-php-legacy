@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.4 - 2026-06-17
+
+- Optimized the per-attribute redaction hot path with no behavior change. `UrlSanitizer::redactSensitiveText()` now runs each Bearer/JWT/email/CPF/card regex only when a cheap necessary-condition substring (or digit) is present, skipping the PCRE engine entirely for the common clean value (route names, enums, hostnames, low-cardinality labels).
+- `AttributeRedactor` now memoizes the per-key redaction plan. Attribute keys are a small, bounded, repeating set, so the regex-heavy key classification is computed once per key per process instead of on every `redactValue()` call. Per-value scanning is unchanged (only the key plan is cached).
+- Result: `redactAttributes()` over a realistic per-request attribute set is ~2.25x faster (about 6.9us to 3.1us per call in the new `benchmarks/redaction.php`), reducing instrumentation CPU on high-attribute/high-span requests. Redaction output is identical; added regression tests assert per-value scanning, key-plan memoization consistency, and pre-gate detection of mixed-case Bearer, embedded JWT, email, CPF and card values.
+
 ## 0.5.3 - 2026-06-17
 
 - Hardened exporter failure paths for production rollouts: `ObservabilityHandle::shutdown()` is now idempotent even when an export fails, preventing duplicate shutdown flush attempts in applications that also register their own shutdown callback.

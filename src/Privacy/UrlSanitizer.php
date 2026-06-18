@@ -76,11 +76,26 @@ final class UrlSanitizer
     public static function redactSensitiveText($value)
     {
         $value = (string) $value;
-        $value = preg_replace('/Bearer\\s+[A-Za-z0-9_\\.\\-]+/i', 'Bearer [REDACTED]', $value);
-        $value = preg_replace('/\\beyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\b/', '[REDACTED_JWT]', $value);
-        $value = preg_replace('/[A-Z0-9._%+\\-]+@[A-Z0-9.\\-]+\\.[A-Z]{2,}/i', '[REDACTED_EMAIL]', $value);
-        $value = preg_replace('/\\b\\d{3}\\.?\\d{3}\\.?\\d{3}-?\\d{2}\\b/', '[REDACTED_CPF]', $value);
-        $value = preg_replace('/\\b(?:\\d[ -]*?){13,19}\\b/', '[REDACTED_CARD]', $value);
+        if ($value === '') {
+            return $value;
+        }
+        // Cheap necessary-condition pre-checks. Each pattern below can only match
+        // when its literal anchor (or, for CPF/card, any digit) is present, so
+        // skipping the PCRE call otherwise is behaviour-preserving and avoids the
+        // regex engine on the common clean value (route names, enums, hostnames).
+        if (stripos($value, 'bearer') !== false) {
+            $value = preg_replace('/Bearer\\s+[A-Za-z0-9_\\.\\-]+/i', 'Bearer [REDACTED]', $value);
+        }
+        if (strpos($value, 'eyJ') !== false) {
+            $value = preg_replace('/\\beyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\b/', '[REDACTED_JWT]', $value);
+        }
+        if (strpos($value, '@') !== false) {
+            $value = preg_replace('/[A-Z0-9._%+\\-]+@[A-Z0-9.\\-]+\\.[A-Z]{2,}/i', '[REDACTED_EMAIL]', $value);
+        }
+        if (strpbrk($value, '0123456789') !== false) {
+            $value = preg_replace('/\\b\\d{3}\\.?\\d{3}\\.?\\d{3}-?\\d{2}\\b/', '[REDACTED_CPF]', $value);
+            $value = preg_replace('/\\b(?:\\d[ -]*?){13,19}\\b/', '[REDACTED_CARD]', $value);
+        }
         return $value;
     }
 

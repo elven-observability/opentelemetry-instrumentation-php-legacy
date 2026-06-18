@@ -9,10 +9,22 @@ final class AttributeRedactor
 {
     const REDACTED = '[REDACTED]';
 
+    /** Per-key redaction plans. Attribute keys are a small, bounded, repeating
+     *  set, so the (otherwise regex-heavy) key classification is computed once
+     *  per key and memoized for the life of the process. */
+    const PLAN_RAW = 0;
+    const PLAN_REDACT = 1;
+    const PLAN_DB = 2;
+    const PLAN_HASH = 3;
+    const PLAN_SCAN = 4;
+
     private $redactionEnabled;
     private $allowRaw;
     private $captureDbStatement;
     private $redactDbStatement;
+
+    /** @var array<string,int> key => PLAN_* cache */
+    private $keyPlanCache = array();
 
     public function __construct(ObservabilityConfig $config)
     {
@@ -49,28 +61,52 @@ final class AttributeRedactor
         if (!$this->redactionEnabled) {
             return $value;
         }
+        $key = (string) $key;
+        $plan = isset($this->keyPlanCache[$key])
+            ? $this->keyPlanCache[$key]
+            : ($this->keyPlanCache[$key] = $this->classifyKey($key));
+
+        switch ($plan) {
+            case self::PLAN_RAW:
+                return $value;
+            case self::PLAN_REDACT:
+                return self::REDACTED;
+            case self::PLAN_DB:
+                if (!$this->captureDbStatement) {
+                    return self::REDACTED;
+                }
+                return $this->redactDbStatement ? DbStatementSanitizer::sanitize($value) : $value;
+            case self::PLAN_HASH:
+                return $this->hashValue($value);
+            default: // PLAN_SCAN
+                return is_string($value) ? UrlSanitizer::redactSensitiveText($value) : $value;
+        }
+    }
+
+    /**
+     * Classifies an attribute key into a redaction plan. Pure function of the key
+     * and the (immutable) config, so the result is safely memoizable per key.
+     *
+     * @return int one of the PLAN_* constants
+     */
+    private function classifyKey($key)
+    {
         if (isset($this->allowRaw[$key])) {
-            return $value;
+            return self::PLAN_RAW;
         }
         if ($key === 'exception.message') {
-            return self::REDACTED;
+            return self::PLAN_REDACT;
         }
         if ($this->isDbStatementKey($key)) {
-            if (!$this->captureDbStatement) {
-                return self::REDACTED;
-            }
-            return $this->redactDbStatement ? DbStatementSanitizer::sanitize($value) : $value;
+            return self::PLAN_DB;
         }
         if ($this->isSensitiveKey($key)) {
-            return self::REDACTED;
+            return self::PLAN_REDACT;
         }
         if ($this->isUserIdentifierKey($key)) {
-            return $this->hashValue($value);
+            return self::PLAN_HASH;
         }
-        if (is_string($value)) {
-            return UrlSanitizer::redactSensitiveText($value);
-        }
-        return $value;
+        return self::PLAN_SCAN;
     }
 
     public function redactHeaders(array $headers)
