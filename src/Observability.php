@@ -24,7 +24,7 @@ final class Observability
      * version). Keep this in sync with the composer package version / git tag
      * as part of the release checklist.
      */
-    const VERSION = '0.5.6';
+    const VERSION = '0.5.7';
 
     /** Instrumentation scope name reported on every exported signal. */
     const SCOPE_NAME = 'elven-observability-php-legacy';
@@ -33,6 +33,7 @@ final class Observability
     private static $tracer;
     private static $metrics;
     private static $logs;
+    private static $context;
     private static $shutdownRegistered = false;
 
     private function __construct()
@@ -137,6 +138,19 @@ final class Observability
             self::init();
         }
         return self::$logs;
+    }
+
+    /**
+     * High-level request context (W3C baggage). Set business context once on the
+     * inbound request and it auto-propagates on outbound hops (HTTP client, SOAP,
+     * AMQP). Request-scoped: reset per request by the server/consumer entrypoints.
+     */
+    public static function context()
+    {
+        if (!self::$context) {
+            self::$context = new \Elven\Observability\PhpLegacy\Context\ContextFacade();
+        }
+        return self::$context;
     }
 
     public static function isEnabled()

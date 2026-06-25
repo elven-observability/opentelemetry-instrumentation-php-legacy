@@ -25,6 +25,12 @@ final class HeaderInjector
         if ($config->hasPropagator('tracecontext')) {
             (new TraceContextPropagator())->inject($headers, $context);
         }
+        // Default to the request-scoped high-level context so business baggage
+        // (traffic_source, is_bot, ...) auto-propagates on EVERY outbound hop
+        // (HTTP client, SOAP/DSG, AMQP) without each call site passing it.
+        if (!$baggage) {
+            $baggage = \Elven\Observability\PhpLegacy\Context\RequestContext::all();
+        }
         if ($baggage && $config->hasPropagator('baggage')) {
             (new BaggagePropagator())->inject($headers, $baggage);
         }

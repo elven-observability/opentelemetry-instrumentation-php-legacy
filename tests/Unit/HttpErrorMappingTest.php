@@ -42,6 +42,52 @@ final class HttpErrorMappingTest extends TestCase
         return $byType;
     }
 
+    /** Find the elven.php.request.errors points and return [error_category => total]. */
+    private function requestErrorCategories(): array
+    {
+        $byCat = array();
+        foreach (Observability::metrics()->collect() as $metric) {
+            if ($metric['name'] !== 'elven.php.request.errors') {
+                continue;
+            }
+            foreach ($metric['points'] as $point) {
+                $cat = isset($point['attributes']['error_category']) ? $point['attributes']['error_category'] : '?';
+                $byCat[$cat] = (isset($byCat[$cat]) ? $byCat[$cat] : 0) + $point['value'];
+            }
+        }
+        return $byCat;
+    }
+
+    public function testErrorCategorySeparatesTechnicalFromClient(): void
+    {
+        // 4xx -> client
+        HttpServerInstrumentation::instrument('GET /forbidden', function () {
+            return 'no';
+        }, function () {
+            return 403;
+        });
+        self::assertSame(array('client' => 1.0), $this->requestErrorCategories());
+
+        // 5xx -> technical
+        HttpServerInstrumentation::instrument('GET /boom', function () {
+            return 'no';
+        }, function () {
+            return 500;
+        });
+        self::assertSame(array('technical' => 1.0), $this->requestErrorCategories());
+
+        // thrown handler -> technical
+        try {
+            HttpServerInstrumentation::instrument('GET /throws', function () {
+                throw new \RuntimeException('boom');
+            });
+            self::fail('should rethrow');
+        } catch (\RuntimeException $e) {
+            // expected
+        }
+        self::assertSame(array('technical' => 1.0), $this->requestErrorCategories());
+    }
+
     public function testSuccessfulRequestRecordsNoError(): void
     {
         HttpServerInstrumentation::instrument('GET /ok', function () {

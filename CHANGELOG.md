@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.7 - 2026-06-25
+
+- Cache effectiveness instrumentation. New `CacheInstrumentation` records cache
+  read outcome and latency as low-cardinality telemetry: counter
+  `elven.php.cache.operations{cache_name, result}` (result = hit|miss|error) and
+  histogram `elven.php.cache.operation.duration` (ms). `observe()` wraps a reader
+  and classifies the outcome (default: value=hit, false=miss, null=driver-error).
+  Ultra-defensive: never throws on the cache path. `cache_name`/`result` added to
+  the metric label allowlist. This surfaces the hit ratio (previously blind) and
+  distinguishes a genuine miss from a driver failure.
+- High-level request context propagation via W3C baggage. New `RequestContext` +
+  `Observability::context()` hold request-scoped business context. The HTTP server
+  span now resets it per request (FPM-safe), extracts inbound `baggage`, and seeds
+  `traffic_source`/`traffic_channel`/`is_bot`. `HeaderInjector::injectContext()`
+  now defaults the outgoing baggage to the current request context, so business
+  context auto-propagates on every outbound hop (HTTP client, SOAP/DSG, AMQP)
+  without each call site passing it — downstream services/spans inherit it.
+  Sensitive keys are still dropped/redacted by `BaggagePropagator`.
+- Error category. `elven.php.request.errors` now carries `error_category`
+  (`technical` for exceptions/5xx, `client` for 4xx) alongside `error_type`, so
+  "our fault" vs "client's fault" is separable at the metric level. Added to the
+  allowlist. (Richer categories — business/validation/dependency — are reserved
+  for app-side emission.)
+
 ## 0.5.6 - 2026-06-25
 
 - Bot/crawler classification on HTTP server requests. A new `BotClassifier` maps

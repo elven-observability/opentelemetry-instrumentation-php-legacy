@@ -3,8 +3,10 @@
 namespace Elven\Observability\PhpLegacy\Instrumentation;
 
 use Elven\Observability\PhpLegacy\Attribution\TrafficSourceResolver;
+use Elven\Observability\PhpLegacy\Context\RequestContext;
 use Elven\Observability\PhpLegacy\Observability;
 use Elven\Observability\PhpLegacy\Privacy\UrlSanitizer;
+use Elven\Observability\PhpLegacy\Propagation\BaggagePropagator;
 use Elven\Observability\PhpLegacy\Propagation\TraceContextPropagator;
 use Elven\Observability\PhpLegacy\Trace\Span;
 
@@ -46,14 +48,34 @@ final class HttpServerInstrumentation
         // the span; only is_bot is promoted to request metrics to keep label
         // cardinality flat. Never derives from the raw UA in a metric label.
         $userAgent = isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
+        $bot = BotClassifier::classify($userAgent);
         $status['attributes'] = array_merge(
             $status['attributes'],
             $traffic,
-            BotClassifier::spanAttributes($userAgent)
+            array(
+                'client.is_bot' => $bot['is_bot'] ? 'true' : 'false',
+                'bot.category' => $bot['category'],
+            )
         );
         Observability::metrics()->setRequestAttributes(
-            array_merge($traffic, BotClassifier::metricAttributes($userAgent))
+            array_merge($traffic, array('is_bot' => $bot['is_bot'] ? 'true' : 'false'))
         );
+
+        // High-level context (W3C baggage). Reset per request (FPM reuses the
+        // worker), pick up any inbound baggage from upstream (e.g. the browser /
+        // an API gateway), then seed the business context this service knows so it
+        // propagates to every downstream hop (HTTP client, SOAP/DSG, AMQP).
+        RequestContext::reset();
+        if ($handle->config()->hasPropagator('baggage')) {
+            RequestContext::merge((new BaggagePropagator())->extract($_SERVER));
+        }
+        if (isset($traffic['traffic_source'])) {
+            RequestContext::set('traffic_source', $traffic['traffic_source']);
+        }
+        if (isset($traffic['traffic_channel'])) {
+            RequestContext::set('traffic_channel', $traffic['traffic_channel']);
+        }
+        RequestContext::set('is_bot', $bot['is_bot'] ? 'true' : 'false');
 
         return Observability::tracer()->startSpan($method . ' ' . $route, $status);
     }
@@ -84,9 +106,10 @@ final class HttpServerInstrumentation
             // The handler threw. recordException() (in instrument) already set the
             // span ERROR status + exception.type event; count it once here so a
             // thrown request is never missed by the error rate, and never double
-            // counted with http_5xx below.
+            // counted with http_5xx below. error_category=technical (our fault).
             Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
                 'error_type' => 'exception',
+                'error_category' => 'technical',
             ));
         } elseif ($code >= 500) {
             if (method_exists($span, 'setStatus')) {
@@ -95,14 +118,16 @@ final class HttpServerInstrumentation
             Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
                 'status_code' => (string) $statusCode,
                 'error_type' => 'http_5xx',
+                'error_category' => 'technical',
             ));
         } elseif ($code >= 400) {
             // 4xx is a client error: per HTTP semconv a SERVER span is NOT marked
             // ERROR for 4xx, but we still count it so client-error rate (401/403/
-            // 404/429...) is observable per status code.
+            // 404/429...) is observable per status code. error_category=client.
             Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
                 'status_code' => (string) $statusCode,
                 'error_type' => 'http_4xx',
+                'error_category' => 'client',
             ));
         }
         if (method_exists($span, 'end')) {
