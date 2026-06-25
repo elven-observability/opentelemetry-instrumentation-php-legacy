@@ -96,7 +96,7 @@ final class HttpServerInstrumentation
             throw $e;
         } finally {
             $status = self::resolveStatus($statusResolver);
-            Observability::metrics()->histogram('http.server.request.duration')->record((microtime(true) - $start) * 1000, array(
+            Observability::metrics()->histogram('http.server.request.duration', 's')->record(microtime(true) - $start, array(
                 'route' => $route,
                 'method' => isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET',
                 'status_code' => (string) $status,

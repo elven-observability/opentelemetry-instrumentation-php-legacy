@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.5 - 2026-06-18
+
+- Emit `http.server.request.duration` in SECONDS (semconv unit `s`) with the OTel
+  recommended second-scaled histogram boundaries instead of milliseconds. The
+  metric now exports as `http_server_request_duration_seconds`, matching the
+  semantic convention, Beyla, and existing dashboards — so the PHP instrumentation
+  can be the definitive source of the HTTP golden signals (rate/errors/duration)
+  and the temporary Beyla layer can eventually be retired without changing panels.
+- `MetricFacade` now selects histogram boundaries by unit (seconds vs the default
+  millisecond scale), so custom `elven.php.*` duration histograms keep their ms
+  boundaries while seconds-unit histograms become percentile-usable.
+
+
 ## 0.5.4 - 2026-06-17
 
 - Optimized the per-attribute redaction hot path with no behavior change. `UrlSanitizer::redactSensitiveText()` now runs each Bearer/JWT/email/CPF/card regex only when a cheap necessary-condition substring (or digit) is present, skipping the PCRE engine entirely for the common clean value (route names, enums, hostnames, low-cardinality labels).

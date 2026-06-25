@@ -53,6 +53,27 @@ final class MetricFacade
         10000.0,
     );
 
+    // OpenTelemetry semconv recommended boundaries (seconds) for HTTP/RPC request
+    // duration histograms. Used when a histogram is recorded with unit 's' so the
+    // metric (e.g. http_server_request_duration_seconds) is percentile-usable and
+    // matches the convention used by Beyla and the existing dashboards.
+    private static $secondsHistogramBounds = array(
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.075,
+        0.1,
+        0.25,
+        0.5,
+        0.75,
+        1.0,
+        2.5,
+        5.0,
+        7.5,
+        10.0,
+    );
+
     public function __construct(
         $exporter,
         AttributeRedactor $redactor,
@@ -146,6 +167,9 @@ final class MetricFacade
             return;
         }
         $name = $this->normalizeMetricName($name);
+        // Seconds-unit histograms (semconv durations like http.server.request.duration)
+        // need second-scaled boundaries; the default boundaries are millisecond-scaled.
+        $bounds = $unit === 's' ? self::$secondsHistogramBounds : self::$defaultHistogramBounds;
         $key = $this->pointKey($name, $attributes);
         if (!isset($this->histogramData[$key]) && !$this->allowNewPoint()) {
             return;
@@ -157,15 +181,15 @@ final class MetricFacade
             $point['min'] = $value;
             $point['max'] = $value;
             $point['unit'] = $unit;
-            $point['explicitBounds'] = self::$defaultHistogramBounds;
-            $point['bucketCounts'] = array_fill(0, count(self::$defaultHistogramBounds) + 1, 0);
+            $point['explicitBounds'] = $bounds;
+            $point['bucketCounts'] = array_fill(0, count($bounds) + 1, 0);
             $this->histogramData[$key] = $point;
         }
         $this->histogramData[$key]['count']++;
         $this->histogramData[$key]['sum'] += $value;
         $this->histogramData[$key]['min'] = min($this->histogramData[$key]['min'], $value);
         $this->histogramData[$key]['max'] = max($this->histogramData[$key]['max'], $value);
-        $bucket = $this->bucketIndex($value, self::$defaultHistogramBounds);
+        $bucket = $this->bucketIndex($value, $bounds);
         $this->histogramData[$key]['bucketCounts'][$bucket]++;
         $this->histogramData[$key]['timeUnixNano'] = Clock::nowUnixNano();
     }
