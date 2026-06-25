@@ -36,6 +36,7 @@ final class MetricFacade
         'error_type',
         'traffic_source',
         'traffic_channel',
+        'is_bot',
     );
 
     private static $defaultHistogramBounds = array(

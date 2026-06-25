@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.6 - 2026-06-25
+
+- Bot/crawler classification on HTTP server requests. A new `BotClassifier` maps
+  the User-Agent to a low-cardinality outcome: `client.is_bot` (boolean) plus a
+  bounded `bot.category` enum (search_engine, social, seo, monitoring, tooling,
+  generic_bot, none). `client.is_bot` and `bot.category` are added to the SERVER
+  span; only `is_bot` is promoted to request metrics (added to the metric label
+  allowlist) to keep `elven.php.*` request-metric cardinality flat. The raw
+  User-Agent is never used as a metric label. Classification is ultra-defensive
+  (non-string/empty UA returns the human default) and never throws on the request
+  path. Lets dashboards split demand by human vs automated traffic.
+- Error mapping is now complete across the request outcome. `finish()` records a
+  single bounded `elven.php.request.errors` increment with `error_type` of
+  `exception`, `http_5xx`, or `http_4xx` (previously only `http_5xx` was counted).
+  4xx client errors are now observable per status code without marking the SERVER
+  span as ERROR (per HTTP semconv). Thrown handlers are reported exactly once via
+  a new optional `$throwable` argument to `finish()`, so an exception is never
+  missed (when the status still reads 200 mid-propagation) nor double-counted
+  with `http_5xx`. Backward compatible: existing `finish($span, $status)` callers
+  keep working and gain 4xx counting.
+
 ## 0.5.5 - 2026-06-18
 
 - Emit `http.server.request.duration` in SECONDS (semconv unit `s`) with the OTel

@@ -42,13 +42,34 @@ final class HttpServerInstrumentation
             $status['attributes']['client.address'] = $_SERVER['REMOTE_ADDR'];
         }
         $traffic = TrafficSourceResolver::attributesFromRequest(self::requestData(), $_SERVER);
-        $status['attributes'] = array_merge($status['attributes'], $traffic);
-        Observability::metrics()->setRequestAttributes($traffic);
+        // Bot/crawler classification (low cardinality): is_bot + bot.category on
+        // the span; only is_bot is promoted to request metrics to keep label
+        // cardinality flat. Never derives from the raw UA in a metric label.
+        $userAgent = isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
+        $status['attributes'] = array_merge(
+            $status['attributes'],
+            $traffic,
+            BotClassifier::spanAttributes($userAgent)
+        );
+        Observability::metrics()->setRequestAttributes(
+            array_merge($traffic, BotClassifier::metricAttributes($userAgent))
+        );
 
         return Observability::tracer()->startSpan($method . ' ' . $route, $status);
     }
 
-    public static function finish($span, $statusCode = null)
+    /**
+     * Close the server span and classify the request outcome into a single
+     * elven.php.request.errors increment (bounded error_type: exception /
+     * http_5xx / http_4xx). The optional $throwable lets instrument() report a
+     * thrown handler exactly once, instead of relying on a status code that may
+     * still read 200 while the exception is propagating.
+     *
+     * @param object        $span
+     * @param int|null      $statusCode
+     * @param \Throwable|null $throwable Set when the handler threw (already recorded on the span).
+     */
+    public static function finish($span, $statusCode = null, $throwable = null)
     {
         if (!is_object($span) || !method_exists($span, 'setAttribute')) {
             return;
@@ -57,14 +78,31 @@ final class HttpServerInstrumentation
             $statusCode = http_response_code();
         }
         $statusCode = $statusCode ?: 200;
-        $span->setAttribute('http.response.status_code', (int) $statusCode);
-        if ((int) $statusCode >= 500) {
+        $code = (int) $statusCode;
+        $span->setAttribute('http.response.status_code', $code);
+        if ($throwable !== null) {
+            // The handler threw. recordException() (in instrument) already set the
+            // span ERROR status + exception.type event; count it once here so a
+            // thrown request is never missed by the error rate, and never double
+            // counted with http_5xx below.
+            Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
+                'error_type' => 'exception',
+            ));
+        } elseif ($code >= 500) {
             if (method_exists($span, 'setStatus')) {
                 $span->setStatus('ERROR', 'HTTP ' . $statusCode);
             }
             Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
                 'status_code' => (string) $statusCode,
                 'error_type' => 'http_5xx',
+            ));
+        } elseif ($code >= 400) {
+            // 4xx is a client error: per HTTP semconv a SERVER span is NOT marked
+            // ERROR for 4xx, but we still count it so client-error rate (401/403/
+            // 404/429...) is observable per status code.
+            Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
+                'status_code' => (string) $statusCode,
+                'error_type' => 'http_4xx',
             ));
         }
         if (method_exists($span, 'end')) {
@@ -89,9 +127,11 @@ final class HttpServerInstrumentation
     {
         $span = self::startFromGlobals($route);
         $start = microtime(true);
+        $throwable = null;
         try {
             return call_user_func($callback, $span);
         } catch (\Throwable $e) {
+            $throwable = $e;
             $span->recordException($e);
             throw $e;
         } finally {
@@ -101,7 +141,7 @@ final class HttpServerInstrumentation
                 'method' => isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET',
                 'status_code' => (string) $status,
             ));
-            self::finish($span, $status);
+            self::finish($span, $status, $throwable);
         }
     }
 
