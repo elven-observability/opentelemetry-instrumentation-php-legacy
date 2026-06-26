@@ -42,6 +42,17 @@ final class VersionAndHttpStatusTest extends TestCase
         self::assertSame(Observability::SCOPE_NAME, $resource['telemetry.sdk.name']);
     }
 
+    public function testResourceDoesNotEmitProcessPidToAvoidCardinalityBlowup(): void
+    {
+        // process.pid changes per PHP-FPM worker; if a collector promotes resource
+        // attributes to metric labels it would explode time-series cardinality.
+        $config = EnvConfigResolver::resolve(array('service_name' => 'legacy-pid-test'));
+        $resource = ResourceBuilder::build($config);
+        self::assertArrayNotHasKey('process.pid', $resource);
+        // host.name is bounded per host and intentionally retained.
+        self::assertArrayHasKey('host.name', $resource);
+    }
+
     public function testExporterScopesUseTheVersionConstant(): void
     {
         $config = EnvConfigResolver::resolve(array('service_name' => 'legacy-version-test'));

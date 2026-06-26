@@ -21,7 +21,12 @@ final class ResourceBuilder
             'telemetry.sdk.version' => self::version(),
             'process.runtime.name' => 'php',
             'process.runtime.version' => PHP_VERSION,
-            'process.pid' => getmypid(),
+            // NOTE: process.pid is intentionally NOT emitted. Under PHP-FPM the PID
+            // changes per worker (recycled via pm.max_requests), so when a collector
+            // promotes resource attributes to metric labels
+            // (prometheusremotewrite resource_to_telemetry_conversion), it produces
+            // unbounded time-series cardinality. host.name stays: it is bounded per
+            // host and useful to distinguish instance-pool replicas.
             'host.name' => php_uname('n'),
         );
 
