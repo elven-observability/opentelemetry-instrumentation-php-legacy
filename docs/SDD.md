@@ -31,6 +31,8 @@ The library is intentionally small and explicit:
 
 OTLP HTTP/JSON is the v1 wire format because it is supported by the OTLP spec and avoids PHP 7.3 protobuf dependency risk. Payloads follow the resource/scope/span, resource/scope/metric, and resource/scope/log OTLP JSON shape.
 
+Metrics are accumulated in request-local memory, then exported at shutdown. Counters and histograms default to OTLP `AGGREGATION_TEMPORALITY_CUMULATIVE` because common Collector pipelines that forward to Mimir through `prometheusremotewrite` reject or drop delta sums/histograms during translation. Customers with an explicit delta-compatible Collector pipeline can set `ELVEN_OTEL_METRICS_TEMPORALITY=delta`.
+
 The app should export to a customer/local Collector. The application does not need Elven backend credentials when using that path. Logs are not sent directly to Loki from PHP; the Collector owns the Loki exporter/routing and any backend credentials.
 
 ## Privacy Strategy
@@ -48,7 +50,7 @@ Telemetry must not break the application. The exporter uses short timeouts, catc
 ## Tradeoffs
 
 - Manual wrappers are used instead of auto-instrumentation because the target app is Slim 2/custom legacy PHP.
-- Metrics are request-local deltas because PHP-FPM multi-process workers are not a reliable source for process-global gauges.
+- Metrics are request-local aggregates exported as cumulative OTLP by default for Prometheus remote write compatibility. This accepts per-worker/request resets as the practical tradeoff for PHP-FPM and avoids losing counters/histograms in Mimir.
 - OTLP log export is opt-in because many legacy apps already ship logs through file/stdout agents; enabling both paths can duplicate Loki entries.
 - Long-running workers must call `init()` and `shutdown()` per logical request/job. The singleton API remains PHP-FPM-friendly, but request context is explicitly refreshed to avoid cross-request trace leakage.
 - Official SDK adapter is deferred until target apps can run a compatible PHP version.

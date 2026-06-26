@@ -11,12 +11,16 @@ final class OtlpHttpJsonMetricExporter
     private $endpoint;
     private $resource;
     private $client;
+    private $aggregationTemporality;
 
     public function __construct(ObservabilityConfig $config, array $resource)
     {
         $this->endpoint = $config->metricsEndpoint();
         $this->resource = $resource;
         $this->client = new HttpJsonClient($config->headers(), $config->timeoutMillis());
+        $this->aggregationTemporality = $config->metricsTemporality() === 'delta'
+            ? 'AGGREGATION_TEMPORALITY_DELTA'
+            : 'AGGREGATION_TEMPORALITY_CUMULATIVE';
     }
 
     public function export(array $metrics)
@@ -52,7 +56,7 @@ final class OtlpHttpJsonMetricExporter
                 $encoded[] = array(
                     'name' => $metric['name'],
                     'sum' => array(
-                        'aggregationTemporality' => 'AGGREGATION_TEMPORALITY_DELTA',
+                        'aggregationTemporality' => $this->aggregationTemporality,
                         'isMonotonic' => true,
                         'dataPoints' => $this->dataPoints($metric['points'], 'asDouble'),
                     ),
@@ -62,7 +66,7 @@ final class OtlpHttpJsonMetricExporter
                     'name' => $metric['name'],
                     'unit' => isset($metric['unit']) ? $metric['unit'] : '',
                     'histogram' => array(
-                        'aggregationTemporality' => 'AGGREGATION_TEMPORALITY_DELTA',
+                        'aggregationTemporality' => $this->aggregationTemporality,
                         'dataPoints' => $this->histogramPoints($metric['points']),
                     ),
                 );

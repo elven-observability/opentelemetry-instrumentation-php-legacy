@@ -206,6 +206,41 @@ final class LogsAndInstrumentationTest extends TestCase
         self::assertSame('ok', $result);
     }
 
+    public function testDbInstrumentationDoesNotAttachStatementWhenCaptureIsOff(): void
+    {
+        Env::reset();
+        putenv('OTEL_TRACES_EXPORTER=none');
+        putenv('OTEL_METRICS_EXPORTER=none');
+        putenv('ELVEN_OTEL_REDACTION_ENABLED=false');
+        putenv('ELVEN_OTEL_CAPTURE_DB_STATEMENT=false');
+        Observability::init(array('service_name' => 'db-capture-off-test'));
+
+        DbInstrumentation::traceQuery('mysql', 'select', 'booking', function ($span) {
+            self::assertArrayNotHasKey('db.statement', $span->attributes());
+            self::assertSame('SELECT users', $span->attributes()['db.query.summary']);
+            return 'ok';
+        }, "select * from users where email='secret@example.com'");
+    }
+
+    public function testDbInstrumentationCanAttachRawStatementWhenExplicitlyEnabled(): void
+    {
+        Env::reset();
+        putenv('OTEL_TRACES_EXPORTER=none');
+        putenv('OTEL_METRICS_EXPORTER=none');
+        putenv('ELVEN_OTEL_REDACTION_ENABLED=false');
+        putenv('ELVEN_OTEL_CAPTURE_DB_STATEMENT=true');
+        putenv('ELVEN_OTEL_REDACT_DB_STATEMENT=false');
+        Observability::init(array('service_name' => 'db-capture-raw-test'));
+
+        DbInstrumentation::traceQuery('mysql', 'select', 'booking', function ($span) {
+            self::assertSame(
+                "select * from users where email='secret@example.com'",
+                $span->attributes()['db.statement']
+            );
+            return 'ok';
+        }, "select * from users where email='secret@example.com'");
+    }
+
     public function testMetricPointLimitEnvIsAppliedByObservability(): void
     {
         Env::reset();

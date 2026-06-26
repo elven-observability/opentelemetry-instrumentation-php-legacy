@@ -58,6 +58,22 @@ $span->setAttributes($traffic);
 
 If the app passes only dynamic ids such as click id, redirect id, session id, or order id, the resolver will intentionally export `unknown`/`other` instead of the raw value. Map the app-specific source to stable categories such as `front`, `skyscanner`, `google_flights`, `mundi`, `kayak`, `viajala`, or `backend`.
 
+## Only gauge metrics appear in Mimir
+
+If the Collector accepts `/v1/metrics` but Mimir shows gauges such as `elven_php_request_memory_peak` while counters/histograms such as `http_server_request_duration_*` or `elven_php_dependency_duration_*` are missing, check the Collector self-metric:
+
+```promql
+increase(otelcol_exporter_prometheusremotewrite_failed_translations[10m])
+```
+
+For Collector pipelines that forward metrics to Mimir with `prometheusremotewrite`, keep:
+
+```bash
+ELVEN_OTEL_METRICS_TEMPORALITY=cumulative
+```
+
+Use `delta` only when the Collector has an explicit delta-compatible processor/exporter path.
+
 ## Values are still redacted
 
 Library-side redaction is enabled by default. To disable it globally for customers that explicitly own redaction downstream:
@@ -68,7 +84,7 @@ ELVEN_OTEL_REDACTION_ENABLED=false
 
 Also accepted: `off`, `0`, and `no`. Restart/reload PHP-FPM after changing environment variables so workers see the new value.
 
-This switch keeps span/log/header values raw, including DB statements passed to `DbInstrumentation::traceQuery()`. It does not disable metric label allowlists, metric label normalization, or high-cardinality collapse.
+This switch keeps span/log/header values raw. DB statements still require `ELVEN_OTEL_CAPTURE_DB_STATEMENT=true`; otherwise `DbInstrumentation::traceQuery()` exports only `db.query.summary`. It does not disable metric label allowlists, metric label normalization, or high-cardinality collapse.
 
 ## `http/protobuf` configured
 

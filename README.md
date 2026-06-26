@@ -32,7 +32,7 @@ Default behavior is intentionally conservative:
 - Monolog/custom log correlation: enabled.
 - OTLP logs exporter: disabled unless `OTEL_LOGS_EXPORTER=otlp` is set, to avoid accidentally duplicating an existing log pipeline.
 - Payload, body, XML, cookies, tokens, passwords, Authorization, raw user id, and raw SQL capture: redacted or disabled.
-- DB spans include `db.query.summary`; raw `db.statement` is redacted unless redaction is explicitly disabled.
+- DB spans include `db.query.summary`; `db.statement` is omitted unless `ELVEN_OTEL_CAPTURE_DB_STATEMENT=true`.
 
 Set this at any time to turn the whole library into no-op:
 
@@ -129,6 +129,7 @@ OTEL_TRACES_SAMPLER=parentbased_traceidratio
 OTEL_TRACES_SAMPLER_ARG=1
 
 OTEL_METRICS_EXPORTER=otlp
+ELVEN_OTEL_METRICS_TEMPORALITY=cumulative
 OTEL_LOGS_EXPORTER=otlp
 ELVEN_OTEL_LOG_CORRELATION_ENABLED=true
 
@@ -353,12 +354,13 @@ For customers that explicitly do not want library-side redaction and own the pri
 ELVEN_OTEL_REDACTION_ENABLED=false
 ```
 
-Accepted false values are `false`, `off`, `0`, and `no`. This keeps span/log/header values raw, including `db.statement` when the application passes SQL into `DbInstrumentation::traceQuery()`.
+Accepted false values are `false`, `off`, `0`, and `no`. This keeps span/log/header values raw. DB statements still require `ELVEN_OTEL_CAPTURE_DB_STATEMENT=true`; otherwise `DbInstrumentation::traceQuery()` exports only `db.query.summary`.
 
 Do not use either of these production settings without explicit written approval:
 
 ```bash
 ELVEN_OTEL_REDACTION_ENABLED=false
+ELVEN_OTEL_CAPTURE_DB_STATEMENT=true
 ELVEN_OTEL_REDACT_DB_STATEMENT=false
 ```
 

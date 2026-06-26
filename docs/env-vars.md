@@ -42,6 +42,8 @@
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `OTEL_METRICS_EXPORTER` | `otlp` | Use `none` to disable metric export. |
+| `ELVEN_OTEL_METRICS_TEMPORALITY` | `cumulative` | OTLP temporality for counters/histograms. Use `cumulative` for Collector `prometheusremotewrite`/Mimir. Use `delta` only when the Collector pipeline explicitly supports delta metrics. |
+| `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE` | `cumulative` | Standard-compatible fallback when `ELVEN_OTEL_METRICS_TEMPORALITY` is absent. `delta` and `lowmemory` map to delta; any other value maps to cumulative. |
 | `ELVEN_OTEL_MAX_METRIC_POINTS_PER_REQUEST` | `512` | Excess metric series in one request/job are dropped and counted. |
 
 Metric labels are restricted to low-cardinality keys: `service_name`, `service_namespace`, `environment`, `route`, `method`, `status_code`, `dependency_type`, `dependency_name`, `operation`, `error_type`, `traffic_source`, `traffic_channel`.

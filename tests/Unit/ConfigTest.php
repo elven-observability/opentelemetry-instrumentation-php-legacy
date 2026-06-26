@@ -89,6 +89,20 @@ final class ConfigTest extends TestCase
         self::assertTrue($config->redactionEnabled());
     }
 
+    public function testMetricsTemporalityDefaultsToCumulativeAndSupportsDeltaEnv(): void
+    {
+        $config = EnvConfigResolver::resolve();
+        self::assertSame('cumulative', $config->metricsTemporality());
+
+        putenv('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta');
+        $config = EnvConfigResolver::resolve();
+        self::assertSame('delta', $config->metricsTemporality());
+
+        putenv('ELVEN_OTEL_METRICS_TEMPORALITY=cumulative');
+        $config = EnvConfigResolver::resolve();
+        self::assertSame('cumulative', $config->metricsTemporality());
+    }
+
     public function testReservedResourceAttributesCannotOverrideExplicitIdentity(): void
     {
         putenv('OTEL_RESOURCE_ATTRIBUTES=service.name=wrong,deployment.environment.name=wrong,team=payments');

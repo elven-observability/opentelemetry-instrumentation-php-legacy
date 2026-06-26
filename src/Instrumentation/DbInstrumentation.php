@@ -19,7 +19,13 @@ final class DbInstrumentation
             'dependency_name' => (string) $system,
         ), $attributes);
         if ($statement !== null) {
-            $attrs['db.statement'] = $statement;
+            try {
+                if (Observability::init()->config()->captureDbStatement()) {
+                    $attrs['db.statement'] = $statement;
+                }
+            } catch (\Throwable $e) {
+                // Telemetry config lookup must never affect the database call.
+            }
         }
         return self::trace('DB ' . strtoupper((string) $operation), 'db', (string) $system, $attrs, $callback);
     }

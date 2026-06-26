@@ -22,6 +22,7 @@ final class ObservabilityConfig
     private $propagators;
     private $tracesExporter;
     private $metricsExporter;
+    private $metricsTemporality;
     private $logsExporter;
     private $sampler;
     private $samplerArg;
@@ -55,6 +56,7 @@ final class ObservabilityConfig
         $this->propagators = (array) $values['propagators'];
         $this->tracesExporter = (string) $values['traces_exporter'];
         $this->metricsExporter = (string) $values['metrics_exporter'];
+        $this->metricsTemporality = (string) $values['metrics_temporality'];
         $this->logsExporter = (string) $values['logs_exporter'];
         $this->sampler = (string) $values['sampler'];
         $this->samplerArg = (float) $values['sampler_arg'];
@@ -159,6 +161,11 @@ final class ObservabilityConfig
         return $this->metricsExporter;
     }
 
+    public function metricsTemporality()
+    {
+        return $this->metricsTemporality;
+    }
+
     public function logsExporter()
     {
         return $this->logsExporter;
@@ -244,6 +251,7 @@ final class ObservabilityConfig
             'propagators' => $this->propagators,
             'traces_exporter' => $this->tracesExporter,
             'metrics_exporter' => $this->metricsExporter,
+            'metrics_temporality' => $this->metricsTemporality,
             'logs_exporter' => $this->logsExporter,
             'sampler' => $this->sampler,
             'sampler_arg' => $this->samplerArg,

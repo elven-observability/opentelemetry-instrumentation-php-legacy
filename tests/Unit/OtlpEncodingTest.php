@@ -81,9 +81,29 @@ final class OtlpEncodingTest extends TestCase
         $metrics = $payload['resourceMetrics'][0]['scopeMetrics'][0]['metrics'];
         self::assertSame('business.operation.started', $metrics[0]['name']);
         self::assertSame('http.server.request.duration', $metrics[1]['name']);
+        self::assertSame('AGGREGATION_TEMPORALITY_CUMULATIVE', $metrics[0]['sum']['aggregationTemporality']);
+        self::assertSame('AGGREGATION_TEMPORALITY_CUMULATIVE', $metrics[1]['histogram']['aggregationTemporality']);
         self::assertCount(3, $metrics[0]['sum']['dataPoints'][0]['attributes']);
         self::assertArrayHasKey('bucketCounts', $metrics[1]['histogram']['dataPoints'][0]);
         self::assertArrayHasKey('explicitBounds', $metrics[1]['histogram']['dataPoints'][0]);
+    }
+
+    public function testMetricPayloadCanUseDeltaTemporalityWhenExplicitlyConfigured(): void
+    {
+        $config = EnvConfigResolver::resolve(array(
+            'service_name' => 'legacy-test',
+            'metrics_temporality' => 'delta',
+        ));
+        $redactor = new AttributeRedactor($config);
+        $facade = new MetricFacade(null, $redactor, array('service_name' => 'legacy-test'));
+        $facade->counter('business.operation.started')->add(1, array('operation' => 'ticket_search'));
+        $facade->histogram('http.server.request.duration')->record(15.5, array('route' => '/rest/v2/ticket/search'));
+
+        $payload = (new OtlpHttpJsonMetricExporter($config, ResourceBuilder::build($config)))->payload($facade->collect());
+        $metrics = $payload['resourceMetrics'][0]['scopeMetrics'][0]['metrics'];
+
+        self::assertSame('AGGREGATION_TEMPORALITY_DELTA', $metrics[0]['sum']['aggregationTemporality']);
+        self::assertSame('AGGREGATION_TEMPORALITY_DELTA', $metrics[1]['histogram']['aggregationTemporality']);
     }
 
     public function testMetricRequestAttributesApplyToAllPoints(): void

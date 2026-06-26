@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.8 - 2026-06-25
+
+- Changed OTLP metric counter/histogram temporality to `AGGREGATION_TEMPORALITY_CUMULATIVE` by default so Collector pipelines that export to Mimir through `prometheusremotewrite` translate `http.server.request.duration`, `elven.php.dependency.duration`, and other golden-signal metrics instead of accepting only gauges.
+- Added `ELVEN_OTEL_METRICS_TEMPORALITY` and `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE` support. Set `delta` only for Collector pipelines that explicitly support delta metrics; `lowmemory` maps to delta for standard compatibility.
+- Hardened DB statement capture: `DbInstrumentation::traceQuery()` now attaches `db.statement` only when `ELVEN_OTEL_CAPTURE_DB_STATEMENT=true`, even if global redaction is disabled. Raw statements require both explicit capture and raw/redaction settings.
+- Updated docs and troubleshooting for the “Collector accepts metrics but Mimir only shows gauges / `prometheusremotewrite_failed_translations` rises” failure mode.
+- Bumped the reported `telemetry.sdk.version` / instrumentation scope version to `0.5.8`.
+
 ## 0.5.7 - 2026-06-25
 
 - Cache effectiveness instrumentation. New `CacheInstrumentation` records cache
@@ -56,7 +64,6 @@
 - `MetricFacade` now selects histogram boundaries by unit (seconds vs the default
   millisecond scale), so custom `elven.php.*` duration histograms keep their ms
   boundaries while seconds-unit histograms become percentile-usable.
-
 
 ## 0.5.4 - 2026-06-17
 

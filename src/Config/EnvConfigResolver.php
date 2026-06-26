@@ -73,6 +73,14 @@ final class EnvConfigResolver
             'propagators' => self::listValue(self::string($explicit, 'propagators', self::env('OTEL_PROPAGATORS', 'tracecontext,baggage'))),
             'traces_exporter' => self::string($explicit, 'traces_exporter', self::env('OTEL_TRACES_EXPORTER', 'otlp')),
             'metrics_exporter' => self::string($explicit, 'metrics_exporter', self::env('OTEL_METRICS_EXPORTER', 'otlp')),
+            'metrics_temporality' => self::metricsTemporality(self::string(
+                $explicit,
+                'metrics_temporality',
+                self::firstEnv(
+                    array('ELVEN_OTEL_METRICS_TEMPORALITY', 'OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE'),
+                    'cumulative'
+                )
+            )),
             'logs_exporter' => self::string($explicit, 'logs_exporter', self::env('OTEL_LOGS_EXPORTER', 'none')),
             'sampler' => self::string($explicit, 'sampler', self::env('OTEL_TRACES_SAMPLER', 'parentbased_traceidratio')),
             'sampler_arg' => self::float($explicit, 'sampler_arg', self::env('OTEL_TRACES_SAMPLER_ARG', '1'), 0.0, 1.0),
@@ -142,6 +150,18 @@ final class EnvConfigResolver
             }
         }
         return $default;
+    }
+
+    private static function metricsTemporality($value)
+    {
+        $value = strtolower(trim((string) $value));
+        if ($value === 'delta') {
+            return 'delta';
+        }
+        if ($value === 'lowmemory') {
+            return 'delta';
+        }
+        return 'cumulative';
     }
 
     private static function string(array $explicit, $key, $default)

@@ -171,7 +171,7 @@ If the customer explicitly does not want library-side redaction, use the global 
 ELVEN_OTEL_REDACTION_ENABLED=false
 ```
 
-This keeps span/log/header values raw, including `db.statement` when SQL is passed to `DbInstrumentation::traceQuery()`. Metric labels still remain allowlisted and low-cardinality. Do not disable redaction in production without a written privacy exception and Collector/backend controls.
+This keeps span/log/header values raw. DB statements still require `ELVEN_OTEL_CAPTURE_DB_STATEMENT=true`; otherwise `DbInstrumentation::traceQuery()` exports only `db.query.summary`. Metric labels still remain allowlisted and low-cardinality. Do not disable redaction in production without a written privacy exception and Collector/backend controls.
 
 ## Monolog 1
 

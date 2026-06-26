@@ -17,7 +17,7 @@ final class CacheInstrumentationTest extends TestCase
         Observability::init(array('service_name' => 'cache-test'));
     }
 
-    /** @return array<string,array<string,float>> name => {label combo => value} */
+    /** @return array<string,float> result => value */
     private function operationPointsByResult(): array
     {
         $byResult = array();
@@ -38,7 +38,9 @@ final class CacheInstrumentationTest extends TestCase
         CacheInstrumentation::record('airports', 'hit', 1.5);
         CacheInstrumentation::record('airports', 'miss', 2.0);
 
-        $names = array_map(function ($m) { return $m['name']; }, Observability::metrics()->collect());
+        $names = array_map(function ($m) {
+            return $m['name'];
+        }, Observability::metrics()->collect());
         // collect() drains, so re-emit for the name assertion set
         CacheInstrumentation::record('airports', 'hit', 1.0);
 

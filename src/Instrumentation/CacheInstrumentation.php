@@ -30,7 +30,7 @@ final class CacheInstrumentation
      *
      * @param string     $cacheName  Bounded logical cache name (e.g. 'redis', 'airports', 'session').
      * @param string     $result     One of hit|miss|error.
-     * @param float|null $durationMs  Operation duration in milliseconds (optional).
+     * @param mixed      $durationMs  Operation duration in milliseconds. Numeric values are recorded.
      */
     public static function record($cacheName, $result, $durationMs = null)
     {

@@ -141,7 +141,7 @@ final class TrafficSourceResolver
                 $fallback = 'other';
             }
         }
-        if (self::value($request, array(
+        $hasSkyscannerCode = self::value($request, array(
             'skyScannerCode',
             'skyscannerCode',
             'sky_scanner_code',
@@ -151,12 +151,13 @@ final class TrafficSourceResolver
             'skyscannerCode',
             'sky_scanner_code',
             'SkyScannerCode',
-        )) !== null) {
+        )) !== null;
+        if ($hasSkyscannerCode) {
             return 'skyscanner';
         }
-        if (self::value($request, array('gclid', 'gbraid', 'wbraid')) !== null
-            || self::queryValue($server, array('gclid', 'gbraid', 'wbraid')) !== null
-        ) {
+        $hasGoogleClickId = self::value($request, array('gclid', 'gbraid', 'wbraid')) !== null
+            || self::queryValue($server, array('gclid', 'gbraid', 'wbraid')) !== null;
+        if ($hasGoogleClickId) {
             return 'google';
         }
         return $fallback ?: 'unknown';
