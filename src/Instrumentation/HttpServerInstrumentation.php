@@ -8,6 +8,7 @@ use Elven\Observability\PhpLegacy\Observability;
 use Elven\Observability\PhpLegacy\Privacy\UrlSanitizer;
 use Elven\Observability\PhpLegacy\Propagation\BaggagePropagator;
 use Elven\Observability\PhpLegacy\Propagation\TraceContextPropagator;
+use Elven\Observability\PhpLegacy\Trace\NoopSpan;
 use Elven\Observability\PhpLegacy\Trace\Span;
 
 final class HttpServerInstrumentation
@@ -61,21 +62,28 @@ final class HttpServerInstrumentation
             array_merge($traffic, array('is_bot' => $bot['is_bot'] ? 'true' : 'false'))
         );
 
-        // High-level context (W3C baggage). Reset per request (FPM reuses the
-        // worker), pick up any inbound baggage from upstream (e.g. the browser /
-        // an API gateway), then seed the business context this service knows so it
-        // propagates to every downstream hop (HTTP client, SOAP/DSG, AMQP).
-        RequestContext::reset();
-        if ($handle->config()->hasPropagator('baggage')) {
-            RequestContext::merge((new BaggagePropagator())->extract($_SERVER));
+        // High-level context (W3C baggage). Only when tracing is enabled, so this
+        // is strictly zero-cost when OTel is off. Reset per request (FPM reuses the
+        // worker), pick up any inbound baggage from upstream (browser / gateway),
+        // then seed the business context this service knows so it propagates to
+        // every downstream hop (HTTP client, SOAP/DSG, AMQP). Fully guarded — a
+        // baggage failure must never break the request.
+        if (Observability::isEnabled()) {
+            try {
+                RequestContext::reset();
+                if ($handle->config()->hasPropagator('baggage')) {
+                    RequestContext::merge((new BaggagePropagator())->extract($_SERVER));
+                }
+                if (isset($traffic['traffic_source'])) {
+                    RequestContext::set('traffic_source', $traffic['traffic_source']);
+                }
+                if (isset($traffic['traffic_channel'])) {
+                    RequestContext::set('traffic_channel', $traffic['traffic_channel']);
+                }
+                RequestContext::set('is_bot', $bot['is_bot'] ? 'true' : 'false');
+            } catch (\Throwable $ignored) {
+            }
         }
-        if (isset($traffic['traffic_source'])) {
-            RequestContext::set('traffic_source', $traffic['traffic_source']);
-        }
-        if (isset($traffic['traffic_channel'])) {
-            RequestContext::set('traffic_channel', $traffic['traffic_channel']);
-        }
-        RequestContext::set('is_bot', $bot['is_bot'] ? 'true' : 'false');
 
         return Observability::tracer()->startSpan($method . ' ' . $route, $status);
     }
@@ -87,9 +95,13 @@ final class HttpServerInstrumentation
      * thrown handler exactly once, instead of relying on a status code that may
      * still read 200 while the exception is propagating.
      *
-     * @param object        $span
-     * @param int|null      $statusCode
-     * @param \Throwable|null $throwable Set when the handler threw (already recorded on the span).
+     * Defensive boundary: $span and $statusCode are intentionally untyped — a
+     * non-span $span is ignored and any $statusCode is coerced — so this can be
+     * called safely from a finally block with whatever the request produced.
+     *
+     * @param mixed           $span       A span object, or anything (non-spans are ignored).
+     * @param mixed           $statusCode HTTP status; coerced to int, falsy -> 200.
+     * @param \Throwable|null $throwable  Set when the handler threw (already recorded on the span).
      */
     public static function finish($span, $statusCode = null, $throwable = null)
     {
@@ -101,37 +113,45 @@ final class HttpServerInstrumentation
         }
         $statusCode = $statusCode ?: 200;
         $code = (int) $statusCode;
-        $span->setAttribute('http.response.status_code', $code);
-        if ($throwable !== null) {
-            // The handler threw. recordException() (in instrument) already set the
-            // span ERROR status + exception.type event; count it once here so a
-            // thrown request is never missed by the error rate, and never double
-            // counted with http_5xx below. error_category=technical (our fault).
-            Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
-                'error_type' => 'exception',
-                'error_category' => 'technical',
-            ));
-        } elseif ($code >= 500) {
-            if (method_exists($span, 'setStatus')) {
-                $span->setStatus('ERROR', 'HTTP ' . $statusCode);
+        // Telemetry emission is fully guarded: finish() is public and runs in
+        // instrument()'s finally, so it must never throw into the request path.
+        try {
+            $span->setAttribute('http.response.status_code', $code);
+            if ($throwable !== null) {
+                // The handler threw. recordException() (in instrument) already set the
+                // span ERROR status + exception.type event; count it once here so a
+                // thrown request is never missed by the error rate, and never double
+                // counted with http_5xx below. error_category=technical (our fault).
+                Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
+                    'error_type' => 'exception',
+                    'error_category' => 'technical',
+                ));
+            } elseif ($code >= 500) {
+                if (method_exists($span, 'setStatus')) {
+                    $span->setStatus('ERROR', 'HTTP ' . $statusCode);
+                }
+                Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
+                    'status_code' => (string) $statusCode,
+                    'error_type' => 'http_5xx',
+                    'error_category' => 'technical',
+                ));
+            } elseif ($code >= 400) {
+                // 4xx is a client error: per HTTP semconv a SERVER span is NOT marked
+                // ERROR for 4xx, but we still count it so client-error rate (401/403/
+                // 404/429...) is observable per status code. error_category=client.
+                Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
+                    'status_code' => (string) $statusCode,
+                    'error_type' => 'http_4xx',
+                    'error_category' => 'client',
+                ));
             }
-            Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
-                'status_code' => (string) $statusCode,
-                'error_type' => 'http_5xx',
-                'error_category' => 'technical',
-            ));
-        } elseif ($code >= 400) {
-            // 4xx is a client error: per HTTP semconv a SERVER span is NOT marked
-            // ERROR for 4xx, but we still count it so client-error rate (401/403/
-            // 404/429...) is observable per status code. error_category=client.
-            Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
-                'status_code' => (string) $statusCode,
-                'error_type' => 'http_4xx',
-                'error_category' => 'client',
-            ));
+        } catch (\Throwable $ignored) {
         }
         if (method_exists($span, 'end')) {
-            $span->end();
+            try {
+                $span->end();
+            } catch (\Throwable $ignored) {
+            }
         }
     }
 
@@ -150,23 +170,40 @@ final class HttpServerInstrumentation
      */
     public static function instrument($route, callable $callback, $statusResolver = null)
     {
-        $span = self::startFromGlobals($route);
+        // Telemetry must NEVER break the request. Span creation itself runs under
+        // try/catch with a Noop fallback so the handler always receives a usable
+        // span object even if span/baggage setup fails.
+        try {
+            $span = self::startFromGlobals($route);
+        } catch (\Throwable $e) {
+            $span = new NoopSpan();
+        }
         $start = microtime(true);
         $throwable = null;
         try {
             return call_user_func($callback, $span);
         } catch (\Throwable $e) {
             $throwable = $e;
-            $span->recordException($e);
+            // Recording the exception must never replace the real exception that
+            // is propagating to the caller.
+            try {
+                $span->recordException($e);
+            } catch (\Throwable $ignored) {
+            }
             throw $e;
         } finally {
-            $status = self::resolveStatus($statusResolver);
-            Observability::metrics()->histogram('http.server.request.duration', 's')->record(microtime(true) - $start, array(
-                'route' => $route,
-                'method' => isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET',
-                'status_code' => (string) $status,
-            ));
-            self::finish($span, $status, $throwable);
+            // The whole close-out is telemetry: a failure here must not alter the
+            // return value or the propagating exception.
+            try {
+                $status = self::resolveStatus($statusResolver);
+                Observability::metrics()->histogram('http.server.request.duration', 's')->record(microtime(true) - $start, array(
+                    'route' => $route,
+                    'method' => isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET',
+                    'status_code' => (string) $status,
+                ));
+                self::finish($span, $status, $throwable);
+            } catch (\Throwable $ignored) {
+            }
         }
     }
 

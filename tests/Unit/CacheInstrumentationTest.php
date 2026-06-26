@@ -14,10 +14,11 @@ final class CacheInstrumentationTest extends TestCase
         Env::reset();
         putenv('OTEL_TRACES_EXPORTER=none');
         putenv('OTEL_LOGS_EXPORTER=none');
+        putenv('ELVEN_OTEL_ENABLED=true');
         Observability::init(array('service_name' => 'cache-test'));
     }
 
-    /** @return array<string,float> result => value */
+    /** @return array<string,float|int> result => summed value */
     private function operationPointsByResult(): array
     {
         $byResult = array();
@@ -38,11 +39,10 @@ final class CacheInstrumentationTest extends TestCase
         CacheInstrumentation::record('airports', 'hit', 1.5);
         CacheInstrumentation::record('airports', 'miss', 2.0);
 
-        $names = array_map(function ($m) {
-            return $m['name'];
-        }, Observability::metrics()->collect());
-        // collect() drains, so re-emit for the name assertion set
-        CacheInstrumentation::record('airports', 'hit', 1.0);
+        $names = array();
+        foreach (Observability::metrics()->collect() as $metric) {
+            $names[] = $metric['name'];
+        }
 
         self::assertContains('elven.php.cache.operations', $names);
         self::assertContains('elven.php.cache.operation.duration', $names);

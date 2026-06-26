@@ -22,6 +22,12 @@ namespace Elven\Observability\PhpLegacy\Context;
  */
 final class RequestContext
 {
+    /**
+     * Hard cap on stored members so a misbehaving caller cannot grow the store
+     * unbounded within a request. Aligns with the BaggagePropagator member cap.
+     */
+    const MAX_ITEMS = 64;
+
     /** @var array<string,string> */
     private static $items = array();
 
@@ -48,6 +54,11 @@ final class RequestContext
         $value = (string) $value;
         if (strlen($value) > 512) {
             $value = substr($value, 0, 512);
+        }
+        // Bound the store: keep updating existing keys, but stop adding new ones
+        // past the cap (defensive against unbounded growth on misuse).
+        if (!isset(self::$items[$key]) && count(self::$items) >= self::MAX_ITEMS) {
+            return;
         }
         self::$items[$key] = $value;
     }

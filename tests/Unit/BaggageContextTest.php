@@ -16,6 +16,7 @@ final class BaggageContextTest extends TestCase
         Env::reset();
         putenv('OTEL_TRACES_EXPORTER=none');
         putenv('OTEL_LOGS_EXPORTER=none');
+        putenv('ELVEN_OTEL_ENABLED=true');
         Observability::init(array('service_name' => 'baggage-test'));
         $_GET = array();
         $_POST = array();

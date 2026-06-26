@@ -28,13 +28,21 @@ final class CacheInstrumentation
     /**
      * Record a single cache read outcome.
      *
-     * @param string     $cacheName  Bounded logical cache name (e.g. 'redis', 'airports', 'session').
-     * @param string     $result     One of hit|miss|error.
-     * @param mixed      $durationMs  Operation duration in milliseconds. Numeric values are recorded.
+     * Defensive boundary: inputs are normalized/validated, never trusted —
+     * $durationMs is recorded only when numeric, $result/$cacheName are bounded.
+     *
+     * @param mixed $cacheName  Bounded logical cache name (e.g. 'redis', 'airports', 'session').
+     * @param mixed $result     One of hit|miss|error (anything else -> miss).
+     * @param mixed $durationMs Operation duration in ms; ignored unless numeric.
      */
     public static function record($cacheName, $result, $durationMs = null)
     {
         try {
+            // Zero-cost when OTel is off: the cache read path is hot, so do not
+            // touch the metric machinery unless instrumentation is enabled.
+            if (!Observability::isEnabled()) {
+                return;
+            }
             $attributes = array(
                 'cache_name' => self::normalizeName($cacheName),
                 'result' => self::normalizeResult($result),
@@ -63,7 +71,17 @@ final class CacheInstrumentation
     public static function observe($cacheName, callable $reader, $classifier = null)
     {
         $start = microtime(true);
-        $value = call_user_func($reader);
+        try {
+            $value = call_user_func($reader);
+        } catch (\Throwable $e) {
+            // The cache driver itself threw: record it as an error outcome, then
+            // rethrow so the caller's behavior is unchanged (never swallowed).
+            try {
+                self::record($cacheName, self::RESULT_ERROR, (microtime(true) - $start) * 1000.0);
+            } catch (\Throwable $ignored) {
+            }
+            throw $e;
+        }
         try {
             $result = is_callable($classifier)
                 ? call_user_func($classifier, $value)
@@ -105,8 +123,12 @@ final class CacheInstrumentation
         if ($name === '') {
             return 'unknown';
         }
-        // Keep it a bounded, label-safe token.
-        $name = preg_replace('/[^a-z0-9_\-]/', '_', $name);
-        return substr($name, 0, 40);
+        // Keep it a bounded, label-safe token. preg_replace returns null on a
+        // (pathological) PCRE failure — fall back rather than emit an empty label.
+        $sanitized = preg_replace('/[^a-z0-9_\-]/', '_', $name);
+        if (!is_string($sanitized) || $sanitized === '') {
+            return 'unknown';
+        }
+        return substr($sanitized, 0, 40);
     }
 }

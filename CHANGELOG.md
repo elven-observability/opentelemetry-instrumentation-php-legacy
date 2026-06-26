@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.5.9 - 2026-06-25
+
+Hardening only — no new signals; makes the v0.5.6/v0.5.7 additions impossible to
+let telemetry break or slow the request, and zero-cost when OTel is off.
+
+- `HttpServerInstrumentation::instrument()` is now fully fail-safe: span creation
+  runs under try/catch with a `NoopSpan` fallback (the handler always gets a
+  usable span even if span/baggage setup throws); `recordException()` can no
+  longer replace the real propagating exception; and the entire `finally`
+  close-out (duration histogram + `finish()`) is guarded so a telemetry failure
+  can never alter the return value or the thrown exception.
+- `finish()` guards all metric/span emission (it is public and runs in a
+  `finally`) so it never throws into the request path.
+- High-level baggage seeding in the server span is gated on `isEnabled()` (strict
+  zero-cost when OTel is off) and fully guarded.
+- `CacheInstrumentation::record()` is gated on `isEnabled()` so the hot cache-read
+  path costs nothing when OTel is off; `observe()` now records a driver-error
+  outcome when the reader throws and rethrows (never swallows); `cache_name`
+  sanitization falls back safely on a PCRE failure.
+- `HeaderInjector::injectContext()` guards trace/baggage injection — propagation
+  failures can never break the outbound HTTP/SOAP/AMQP call.
+- `RequestContext` caps stored members (64) to stay bounded under misuse.
+
 ## 0.5.8 - 2026-06-25
 
 - Changed OTLP metric counter/histogram temporality to `AGGREGATION_TEMPORALITY_CUMULATIVE` by default so Collector pipelines that export to Mimir through `prometheusremotewrite` translate `http.server.request.duration`, `elven.php.dependency.duration`, and other golden-signal metrics instead of accepting only gauges.

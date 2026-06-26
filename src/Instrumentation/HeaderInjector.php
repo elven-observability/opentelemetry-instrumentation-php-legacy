@@ -22,17 +22,23 @@ final class HeaderInjector
     public static function injectContext(array $headers, SpanContext $context, array $baggage = array())
     {
         $config = Observability::init()->config();
-        if ($config->hasPropagator('tracecontext')) {
-            (new TraceContextPropagator())->inject($headers, $context);
-        }
-        // Default to the request-scoped high-level context so business baggage
-        // (traffic_source, is_bot, ...) auto-propagates on EVERY outbound hop
-        // (HTTP client, SOAP/DSG, AMQP) without each call site passing it.
-        if (!$baggage) {
-            $baggage = \Elven\Observability\PhpLegacy\Context\RequestContext::all();
-        }
-        if ($baggage && $config->hasPropagator('baggage')) {
-            (new BaggagePropagator())->inject($headers, $baggage);
+        // These headers go onto a real outbound request (HTTP client, SOAP/DSG,
+        // AMQP). A propagation failure must never break that call — guard it and
+        // fall back to the headers we already have.
+        try {
+            if ($config->hasPropagator('tracecontext')) {
+                (new TraceContextPropagator())->inject($headers, $context);
+            }
+            // Default to the request-scoped high-level context so business baggage
+            // (traffic_source, is_bot, ...) auto-propagates on EVERY outbound hop
+            // without each call site passing it.
+            if (!$baggage) {
+                $baggage = \Elven\Observability\PhpLegacy\Context\RequestContext::all();
+            }
+            if ($baggage && $config->hasPropagator('baggage')) {
+                (new BaggagePropagator())->inject($headers, $baggage);
+            }
+        } catch (\Throwable $ignored) {
         }
         return self::sanitizeMap($headers);
     }
