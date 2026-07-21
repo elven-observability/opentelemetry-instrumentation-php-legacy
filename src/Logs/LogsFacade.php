@@ -8,12 +8,15 @@ use Elven\Observability\PhpLegacy\Metrics\MetricFacade;
 use Elven\Observability\PhpLegacy\Privacy\AttributeRedactor;
 use Elven\Observability\PhpLegacy\Privacy\UrlSanitizer;
 use Elven\Observability\PhpLegacy\Support\Clock;
+use Elven\Observability\PhpLegacy\Support\TelemetryValueLimiter;
 
 final class LogsFacade
 {
     const MAX_BODY_BYTES = 8192;
     const MAX_ATTRIBUTE_BYTES = 2048;
     const MAX_ATTRIBUTE_COUNT = 64;
+    const MAX_ATTRIBUTES_TOTAL_BYTES = 16384;
+    const DROPPED_MARKER_RESERVED_BYTES = 32;
     const MAX_ARRAY_ITEMS = 32;
     const MAX_DEPTH = 4;
 
@@ -31,8 +34,8 @@ final class LogsFacade
         ObservabilityConfig $config,
         $tracer,
         $exporter = null,
-        AttributeRedactor $redactor = null,
-        MetricFacade $metrics = null,
+        ?AttributeRedactor $redactor = null,
+        ?MetricFacade $metrics = null,
         $maxRecords = 512
     ) {
         $this->config = $config;
@@ -48,27 +51,30 @@ final class LogsFacade
 
     public function correlate(array $context)
     {
-        if (!$this->config->isEnabled() || !$this->config->logCorrelationEnabled()) {
-            return $context;
+        try {
+            if (!$this->config->isEnabled() || !$this->config->logCorrelationEnabled()) {
+                return $context;
+            }
+
+            $spanContext = is_object($this->tracer) && method_exists($this->tracer, 'currentSpanContext')
+                ? $this->tracer->currentSpanContext()
+                : null;
+
+            if ($spanContext && $spanContext->isValid()) {
+                $context['trace_id'] = $spanContext->traceId();
+                $context['span_id'] = $spanContext->spanId();
+                $context['trace_flags'] = $spanContext->traceFlags();
+            } else {
+                $context['trace_id'] = isset($context['trace_id']) ? $context['trace_id'] : '';
+                $context['span_id'] = isset($context['span_id']) ? $context['span_id'] : '';
+                $context['trace_flags'] = isset($context['trace_flags']) ? $context['trace_flags'] : '';
+            }
+
+            $context['service_name'] = $this->config->serviceName();
+            $context['environment'] = $this->config->environment();
+            $context['hostname'] = $this->hostname;
+        } catch (\Throwable $ignored) {
         }
-
-        $spanContext = method_exists($this->tracer, 'currentSpanContext')
-            ? $this->tracer->currentSpanContext()
-            : null;
-
-        if ($spanContext && $spanContext->isValid()) {
-            $context['trace_id'] = $spanContext->traceId();
-            $context['span_id'] = $spanContext->spanId();
-            $context['trace_flags'] = $spanContext->traceFlags();
-        } else {
-            $context['trace_id'] = isset($context['trace_id']) ? $context['trace_id'] : '';
-            $context['span_id'] = isset($context['span_id']) ? $context['span_id'] : '';
-            $context['trace_flags'] = isset($context['trace_flags']) ? $context['trace_flags'] : '';
-        }
-
-        $context['service_name'] = $this->config->serviceName();
-        $context['environment'] = $this->config->environment();
-        $context['hostname'] = $this->hostname;
         return $context;
     }
 
@@ -167,6 +173,7 @@ final class LogsFacade
 
     private function sanitizeBody($body)
     {
+        $body = TelemetryValueLimiter::limit($body, self::MAX_BODY_BYTES, self::MAX_ARRAY_ITEMS);
         return $this->truncate($this->sanitizeValue('body', $body, 0), self::MAX_BODY_BYTES);
     }
 
@@ -174,15 +181,34 @@ final class LogsFacade
     {
         $safe = array();
         $count = 0;
+        $usedBytes = 0;
         foreach ($attributes as $key => $value) {
-            if ($count >= self::MAX_ATTRIBUTE_COUNT) {
+            if (
+                $count >= self::MAX_ATTRIBUTE_COUNT
+                || $usedBytes >= self::MAX_ATTRIBUTES_TOTAL_BYTES - self::DROPPED_MARKER_RESERVED_BYTES
+            ) {
                 $safe['log.attributes.dropped'] = 1;
                 break;
             }
-            $safe[(string) $key] = $this->truncate(
-                $this->sanitizeValue((string) $key, $value, 0),
-                self::MAX_ATTRIBUTE_BYTES
+            $key = substr((string) $key, 0, 255);
+            if ($key === '') {
+                continue;
+            }
+            $remaining = self::MAX_ATTRIBUTES_TOTAL_BYTES
+                - self::DROPPED_MARKER_RESERVED_BYTES
+                - $usedBytes
+                - strlen($key);
+            if ($remaining < 16) {
+                $safe['log.attributes.dropped'] = 1;
+                break;
+            }
+            $value = TelemetryValueLimiter::limit($value, min(self::MAX_ATTRIBUTE_BYTES, $remaining));
+            $value = $this->truncate(
+                $this->sanitizeValue($key, $value, 0),
+                min(self::MAX_ATTRIBUTE_BYTES, $remaining)
             );
+            $safe[$key] = $value;
+            $usedBytes += strlen($key) + (is_string($value) ? strlen($value) : 16);
             $count++;
         }
         return $safe;
@@ -234,7 +260,7 @@ final class LogsFacade
             $count++;
         }
 
-        $json = json_encode($safe);
+        $json = json_encode($safe, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
         if ($json === false) {
             return '[array]';
         }
@@ -255,13 +281,19 @@ final class LogsFacade
     private function prefixAttributes($prefix, array $attributes)
     {
         $prefixed = array();
+        $count = 0;
         foreach ($attributes as $key => $value) {
+            if ($count >= self::MAX_ATTRIBUTE_COUNT) {
+                break;
+            }
             if ($key === 'exception' && $value instanceof \Throwable) {
                 $prefixed['exception.type'] = get_class($value);
                 $prefixed['exception.message'] = $value->getMessage();
+                $count += 2;
                 continue;
             }
-            $prefixed[$prefix . $key] = $value;
+            $prefixed[substr($prefix . $key, 0, 255)] = $value;
+            $count++;
         }
         return $prefixed;
     }

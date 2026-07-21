@@ -1,0 +1,31 @@
+{
+  "name": "elven-observability/php74-guzzle6-monolog2-compatibility-fixture",
+  "description": "Composer resolution fixture for a representative PHP 7.4 legacy dependency profile.",
+  "type": "project",
+  "repositories": [
+    {
+      "type": "path",
+      "url": "../../..",
+      "options": {
+        "symlink": true
+      }
+    }
+  ],
+  "require": {
+    "php": "7.4.0",
+    "elven-observability/opentelemetry-instrumentation-php-legacy": "*@dev",
+    "guzzlehttp/guzzle": "6.5.8",
+    "monolog/monolog": "2.9.3",
+    "psr/log": "1.1.4"
+  },
+  "config": {
+    "platform": {
+      "php": "7.4.0"
+    },
+    "vendor-dir": "../../../var/compat-php74-guzzle6-monolog2-vendor",
+    "platform-check": false,
+    "sort-packages": true
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}

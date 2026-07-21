@@ -5,6 +5,7 @@ namespace Elven\Observability\PhpLegacy\Instrumentation;
 use Elven\Observability\PhpLegacy\Observability;
 use Elven\Observability\PhpLegacy\Privacy\UrlSanitizer;
 use Elven\Observability\PhpLegacy\Trace\Span;
+use Elven\Observability\PhpLegacy\Trace\NoopSpan;
 
 final class HttpClientInstrumentation
 {
@@ -18,33 +19,47 @@ final class HttpClientInstrumentation
         $parts = parse_url((string) $url);
         $host = isset($parts['host']) ? $parts['host'] : '';
         $path = isset($parts['path']) ? $parts['path'] : '';
-        $spanName = strtoupper((string) $method) . ' ' . ($host ?: 'http') . UrlSanitizer::sanitizePath($path ?: '/');
+        $method = strtoupper((string) $method);
+        $dependencyName = $host !== '' ? strtolower((string) $host) : 'http';
+        $spanName = 'HTTP ' . $method . ' ' . $dependencyName;
         $attrs = array_merge(array(
-            'http.request.method' => strtoupper((string) $method),
+            'http.request.method' => $method,
             'server.address' => $host,
             'server.port' => isset($parts['port']) ? (int) $parts['port'] : 0,
             'url.path' => UrlSanitizer::sanitizePath($path ?: '/'),
             'dependency_type' => 'http',
-            'dependency_name' => $host,
+            'dependency_name' => $dependencyName,
         ), $attributes);
 
         $start = microtime(true);
-        return Observability::tracer()->withSpan($spanName, function ($span) use ($callback, $host, $start) {
+        try {
+            $tracer = Observability::tracer();
+        } catch (\Throwable $ignored) {
+            return self::callClientCallback($callback, new NoopSpan(), array());
+        }
+        return $tracer->withSpan($spanName, function ($span) use ($callback, $dependencyName, $start) {
             try {
                 $headers = HeaderInjector::injectContext(array(), $span->context());
                 $result = self::callClientCallback($callback, $span, $headers);
                 if (is_array($result) && isset($result['status_code'])) {
                     $span->setAttribute('http.response.status_code', (int) $result['status_code']);
-                    if ((int) $result['status_code'] >= 500) {
+                    if ((int) $result['status_code'] >= 400) {
                         $span->setStatus('ERROR', 'HTTP ' . $result['status_code']);
+                        $span->setAttribute('error.type', (string) $result['status_code']);
                     }
                 }
                 return $result;
             } finally {
-                Observability::metrics()->histogram('elven.php.dependency.duration')->record((microtime(true) - $start) * 1000, array(
-                    'dependency_type' => 'http',
-                    'dependency_name' => $host,
-                ));
+                try {
+                    Observability::metrics()->histogram('elven.php.dependency.duration')->record(
+                        max(0.0, (microtime(true) - $start) * 1000),
+                        array(
+                            'dependency_type' => 'http',
+                            'dependency_name' => $dependencyName,
+                        )
+                    );
+                } catch (\Throwable $ignored) {
+                }
             }
         }, array('kind' => Span::KIND_CLIENT, 'attributes' => $attrs));
     }

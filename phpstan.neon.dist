@@ -3,5 +3,7 @@ parameters:
     paths:
         - src
         - tests
+    excludePaths:
+        - tests/Compatibility
     phpVersion: 70313
     treatPhpDocTypesAsCertain: false

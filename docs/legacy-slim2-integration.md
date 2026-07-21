@@ -7,7 +7,7 @@ This guide shows how to integrate the library into a legacy PHP app that uses Sl
 Keep the target application's existing Composer platform constraint. This library supports `php >=7.3.13`.
 
 ```bash
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.5
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.6
 ```
 
 ## Environment
@@ -26,10 +26,10 @@ OTEL_PROPAGATORS=tracecontext,baggage
 OTEL_TRACES_SAMPLER=parentbased_traceidratio
 OTEL_TRACES_SAMPLER_ARG=1
 OTEL_METRICS_EXPORTER=otlp
-OTEL_LOGS_EXPORTER=otlp
+OTEL_LOGS_EXPORTER=none
 ELVEN_OTEL_LOG_CORRELATION_ENABLED=true
 ELVEN_OTEL_REDACTION_ENABLED=true
-ELVEN_OTEL_CAPTURE_DB_STATEMENT=false
+ELVEN_OTEL_CAPTURE_DB_STATEMENT=true
 ELVEN_OTEL_REDACT_DB_STATEMENT=true
 ELVEN_OTEL_MAX_SPANS_PER_REQUEST=128
 ELVEN_OTEL_MAX_LOG_RECORDS_PER_REQUEST=512
@@ -38,7 +38,7 @@ ELVEN_OTEL_EXPORT_TIMEOUT_MS=200
 
 ## Front Controller
 
-Initialize after Composer autoload and register shutdown flushing:
+Initialize after Composer autoload. The library registers one ordered shutdown hook itself:
 
 ```php
 <?php
@@ -47,15 +47,11 @@ use Elven\Observability\PhpLegacy\Observability;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
-$handle = Observability::init(array(
+Observability::init(array(
     'service_name' => getenv('OTEL_SERVICE_NAME') ?: 'legacy-booking-api',
     'service_namespace' => getenv('OTEL_SERVICE_NAMESPACE') ?: 'booking',
     'environment' => getenv('ELVEN_ENVIRONMENT') ?: 'staging',
 ));
-
-register_shutdown_function(function () use ($handle) {
-    $handle->shutdown();
-});
 ```
 
 ## Stable Route Span
@@ -148,7 +144,7 @@ No XML/body/payload is captured by default.
 
 ## DB Statements
 
-By default the library emits a safe `db.query.summary` and redacts raw SQL:
+By default the library emits a safe `db.query.summary` and omits raw SQL. With the environment profile above, sanitized SQL is also emitted:
 
 ```php
 use Elven\Observability\PhpLegacy\Instrumentation\DbInstrumentation;
@@ -173,7 +169,7 @@ ELVEN_OTEL_REDACTION_ENABLED=false
 
 This keeps span/log/header values raw. DB statements still require `ELVEN_OTEL_CAPTURE_DB_STATEMENT=true`; otherwise `DbInstrumentation::traceQuery()` exports only `db.query.summary`. Metric labels still remain allowlisted and low-cardinality. Do not disable redaction in production without a written privacy exception and Collector/backend controls.
 
-## Monolog 1
+## Monolog 1 Or 2
 
 ```php
 use Elven\Observability\PhpLegacy\Logs\MonologTraceProcessor;
@@ -200,6 +196,8 @@ fastcgi_param HTTP_TRACEPARENT $http_traceparent;
 fastcgi_param HTTP_TRACESTATE  $http_tracestate;
 fastcgi_param HTTP_BAGGAGE     $http_baggage;
 ```
+
+Also explicitly forward `OTEL_*`/`ELVEN_OTEL_*` env vars in the FPM pool. Container `printenv` is not proof that an HTTP worker can read them; see the README allowlist.
 
 ## Rollout
 

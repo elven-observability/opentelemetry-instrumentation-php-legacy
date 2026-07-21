@@ -135,7 +135,13 @@ final class AttributeRedactor
 
     private function isUserIdentifierKey($key)
     {
-        return in_array($key, array('user.id', 'enduser.id', 'customer.id'), true);
+        return in_array($key, array(
+            'user.id',
+            'enduser.id',
+            'customer.id',
+            'tenant.id',
+            'organization.id',
+        ), true);
     }
 
     private function isSensitiveKey($key)
@@ -146,7 +152,10 @@ final class AttributeRedactor
 
     private function hashValue($value)
     {
-        return substr(hash('sha256', (string) $value), 0, 16);
+        if (is_string($value) && preg_match('/^[a-f0-9]{32}$/i', $value) === 1) {
+            return strtolower($value);
+        }
+        return IdentifierHasher::hash($value);
     }
 
     private function normalizeMetricLabel($key, $value)
@@ -169,11 +178,35 @@ final class AttributeRedactor
             if (UrlSanitizer::isHighCardinalityValue($value)) {
                 $value = '{id}';
             }
+        } elseif ($key === 'dependency_type') {
+            $value = $this->enumLabel($value, array(
+                'http', 'db', 'aws', 'cache', 'redis', 'memcached', 'mongo',
+                'soap', 'rpc', 'amqp', 'messaging', 'mail', 'smtp', 'search',
+            ));
+        } elseif ($key === 'cache_name') {
+            $value = strtolower((string) preg_replace('/[^a-z0-9_.-]/i', '_', $value));
+            if ($value === '' || UrlSanitizer::isHighCardinalityValue($value)) {
+                $value = 'other';
+            }
+        } elseif ($key === 'result') {
+            $value = $this->enumLabel($value, array(
+                'hit', 'miss', 'error', 'success', 'failure', 'timeout', 'unknown',
+            ));
+        } elseif ($key === 'error_category') {
+            $value = $this->enumLabel($value, array('technical', 'client', 'dependency', 'timeout', 'unknown'));
+        } elseif ($key === 'is_bot') {
+            $value = $this->enumLabel($value, array('true', 'false', 'unknown'));
         } elseif ($key === 'traffic_source') {
             $value = TrafficSourceResolver::normalizeSource($value);
         } elseif ($key === 'traffic_channel') {
             $value = TrafficSourceResolver::normalizeChannel($value);
         }
         return substr($value, 0, 160);
+    }
+
+    private function enumLabel($value, array $allowed)
+    {
+        $value = strtolower(trim((string) $value));
+        return in_array($value, $allowed, true) ? $value : 'other';
     }
 }

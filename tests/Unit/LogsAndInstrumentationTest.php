@@ -104,6 +104,29 @@ final class LogsAndInstrumentationTest extends TestCase
         self::assertCount(1, $this->drainLogRecords(Observability::logs()));
     }
 
+    public function testLogRecordContextHasBoundedTotalMemory(): void
+    {
+        Env::reset();
+        putenv('OTEL_TRACES_EXPORTER=none');
+        putenv('OTEL_METRICS_EXPORTER=none');
+        putenv('OTEL_LOGS_EXPORTER=otlp');
+        Observability::init(array('service_name' => 'log-memory-limit-test'));
+
+        $attributes = array();
+        for ($index = 0; $index < 100; $index++) {
+            $attributes['attribute.' . $index] = str_repeat('x', 10000);
+        }
+        self::assertTrue(Observability::logs()->emit('INFO', array('nested' => $attributes), $attributes));
+        $records = $this->drainLogRecords(Observability::logs());
+
+        $bytes = 0;
+        foreach ($records[0]['attributes'] as $key => $value) {
+            $bytes += strlen((string) $key) + strlen((string) $value);
+        }
+        self::assertLessThanOrEqual(16400, $bytes);
+        self::assertLessThanOrEqual(8192, strlen((string) $records[0]['body']));
+    }
+
     public function testCurlHeaderInjectionAddsTraceparent(): void
     {
         Observability::tracer()->withSpan('client-parent', function () {
@@ -264,7 +287,9 @@ final class LogsAndInstrumentationTest extends TestCase
     {
         $reflection = new \ReflectionClass($logs);
         $property = $reflection->getProperty('records');
-        $property->setAccessible(true);
+        if (PHP_VERSION_ID < 80100) {
+            $property->setAccessible(true);
+        }
         $records = $property->getValue($logs);
         $property->setValue($logs, array());
         return is_array($records) ? $records : array();

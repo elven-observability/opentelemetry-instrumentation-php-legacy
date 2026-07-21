@@ -8,7 +8,7 @@ This library is private by default:
 - No response body capture.
 - No SOAP XML capture.
 - No raw message payload capture.
-- No raw DB statement export.
+- No DB statement export unless `ELVEN_OTEL_CAPTURE_DB_STATEMENT=true`; redaction remains on by default.
 - OTLP log export is off until `OTEL_LOGS_EXPORTER=otlp` is set.
 - OTLP log body and attributes are redacted and bounded before export.
 - No raw Redis/Memcached keys by default.
@@ -44,6 +44,14 @@ Do not log request/response bodies, SOAP XML, customer payloads, raw user identi
 
 `db.statement`, `db.query.text`, `db.sql.text`, and parameter attributes are redacted by default. If statement capture is explicitly enabled, literals and numeric parameters are replaced with `?`, and a safe `db.query.summary` is produced.
 
+SQL sanitization is defense in depth, not authorization to attach arbitrary customer-generated SQL. Keep capture off for unknown dialects/dynamic query builders until synthetic tests prove the sanitizer behavior for those statements.
+
+## Multi-Tenant Identity
+
+Do not put a request tenant in `OTEL_RESOURCE_ATTRIBUTES`; resource attributes are process-wide and would misattribute concurrent/sequential customers served by the same FPM pool.
+
+Use `Observability::context()->setHashed('tenant.id', $identifier)` and a secret-managed `ELVEN_OTEL_ID_HASH_SALT` for stable cross-request correlation. Without the salt, the library uses an ephemeral HMAC key to prevent dictionary reversal, so the pseudonym is request-lifecycle scoped. Raw identifier-like baggage keys are dropped. Pseudonymous tenant values remain forbidden as metric labels because they still create one series per tenant.
+
 ## Global Redaction Opt-Out
 
 Default redaction is controlled by:
@@ -66,10 +74,12 @@ This switch also does not remove log exporter structural limits: very large log 
 
 ## Metric Labels
 
-Only these labels are accepted: `service_name`, `service_namespace`, `environment`, `route`, `method`, `status_code`, `dependency_type`, `dependency_name`, `operation`, `error_type`, `traffic_source`, `traffic_channel`.
+Only these labels are accepted: `service_name`, `service_namespace`, `environment`, `route`, `method`, `status_code`, `dependency_type`, `dependency_name`, `operation`, `error_type`, `traffic_source`, `traffic_channel`, `is_bot`, `error_category`, `cache_name`, and `result`.
 
 Never use request IDs, order IDs, user IDs, tokens, CPF/email, trace IDs, or session IDs as metric labels.
 
 Allowed metric labels are still normalized: routes are path-sanitized, HTTP methods/status codes are constrained, and high-cardinality-looking `operation`, `dependency_name`, and `error_type` values collapse to safe placeholders.
+
+`dependency_type`, `result`, `error_category`, and `is_bot` are enums. Unknown values collapse to `other`; opaque cache names collapse rather than becoming unbounded series.
 
 Traffic attribution labels are also normalized. `traffic_source` is limited to stable categories such as `front`, `google_flights`, `skyscanner`, `mundi`, `kayak`, `viajala`, `backend`, `other`, and `unknown`; high-cardinality-looking raw values collapse instead of being exported.

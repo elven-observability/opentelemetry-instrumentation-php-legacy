@@ -13,11 +13,33 @@ use Elven\Observability\PhpLegacy\Trace\Span;
 
 final class HttpServerInstrumentation
 {
+    /**
+     * Start a request scope that also closes from the library shutdown hook.
+     * Use this entrypoint for front controllers whose response helpers call
+     * exit/die before normal stack unwinding can run.
+     *
+     * @param string        $route
+     * @param callable|null $statusResolver
+     * @return ServerRequestScope
+     */
+    public static function begin($route, $statusResolver = null)
+    {
+        $route = self::normalizeRoute($route);
+        $method = isset($_SERVER['REQUEST_METHOD']) ? strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
+        try {
+            $span = self::startFromGlobals($route);
+        } catch (\Throwable $ignored) {
+            $span = new NoopSpan();
+        }
+        return new ServerRequestScope($span, $route, $method, microtime(true), $statusResolver);
+    }
+
     public static function startFromGlobals($route = null)
     {
+        RequestContext::reset();
         $method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET';
         $path = isset($_SERVER['REQUEST_URI']) ? parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) : '/';
-        $route = $route ?: UrlSanitizer::sanitizePath($path);
+        $route = self::normalizeRoute($route ?: UrlSanitizer::sanitizePath($path));
         $scheme = self::scheme();
         $handle = Observability::init();
         $parent = $handle->config()->hasPropagator('tracecontext')
@@ -70,7 +92,6 @@ final class HttpServerInstrumentation
         // baggage failure must never break the request.
         if (Observability::isEnabled()) {
             try {
-                RequestContext::reset();
                 if ($handle->config()->hasPropagator('baggage')) {
                     RequestContext::merge((new BaggagePropagator())->extract($_SERVER));
                 }
@@ -170,40 +191,17 @@ final class HttpServerInstrumentation
      */
     public static function instrument($route, callable $callback, $statusResolver = null)
     {
-        // Telemetry must NEVER break the request. Span creation itself runs under
-        // try/catch with a Noop fallback so the handler always receives a usable
-        // span object even if span/baggage setup fails.
-        try {
-            $span = self::startFromGlobals($route);
-        } catch (\Throwable $e) {
-            $span = new NoopSpan();
-        }
-        $start = microtime(true);
+        $scope = self::begin($route, $statusResolver);
+        $span = $scope->span();
         $throwable = null;
         try {
             return call_user_func($callback, $span);
         } catch (\Throwable $e) {
             $throwable = $e;
-            // Recording the exception must never replace the real exception that
-            // is propagating to the caller.
-            try {
-                $span->recordException($e);
-            } catch (\Throwable $ignored) {
-            }
+            $scope->recordException($e);
             throw $e;
         } finally {
-            // The whole close-out is telemetry: a failure here must not alter the
-            // return value or the propagating exception.
-            try {
-                $status = self::resolveStatus($statusResolver);
-                Observability::metrics()->histogram('http.server.request.duration', 's')->record(microtime(true) - $start, array(
-                    'route' => $route,
-                    'method' => isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET',
-                    'status_code' => (string) $status,
-                ));
-                self::finish($span, $status, $throwable);
-            } catch (\Throwable $ignored) {
-            }
+            $scope->finish($throwable);
         }
     }
 
@@ -213,7 +211,7 @@ final class HttpServerInstrumentation
      * @param callable|null $statusResolver
      * @return int
      */
-    private static function resolveStatus($statusResolver)
+    public static function resolveStatus($statusResolver)
     {
         if (is_callable($statusResolver)) {
             try {
@@ -235,7 +233,7 @@ final class HttpServerInstrumentation
      * @param mixed $status
      * @return int|null
      */
-    private static function normalizeStatusCode($status)
+    public static function normalizeStatusCode($status)
     {
         if (!is_numeric($status)) {
             return null;
@@ -253,13 +251,42 @@ final class HttpServerInstrumentation
             return 'https';
         }
         if (isset($_SERVER['HTTP_X_FORWARDED_PROTO'])) {
-            return $_SERVER['HTTP_X_FORWARDED_PROTO'];
+            $forwarded = strtolower(trim(explode(',', (string) $_SERVER['HTTP_X_FORWARDED_PROTO'])[0]));
+            return in_array($forwarded, array('http', 'https'), true) ? $forwarded : 'http';
         }
         return 'http';
     }
 
     private static function requestData()
     {
-        return array_merge($_GET, $_POST);
+        $keys = array(
+            'traffic_source', 'trafficSource', 'metasearcher', 'metasearch',
+            'utm_source', 'utmSource', 'partner', 'partnerName', 'source',
+            'traffic_channel', 'trafficChannel', 'channel', 'utm_medium', 'utmMedium',
+            'skyScannerCode', 'skyscannerCode', 'sky_scanner_code', 'SkyScannerCode',
+            'gclid', 'gbraid', 'wbraid',
+        );
+        $request = array();
+        foreach ($keys as $key) {
+            if (isset($_GET[$key]) && is_scalar($_GET[$key])) {
+                $request[$key] = $_GET[$key];
+            } elseif (isset($_POST[$key]) && is_scalar($_POST[$key])) {
+                $request[$key] = $_POST[$key];
+            }
+        }
+        return $request;
+    }
+
+    private static function normalizeRoute($route)
+    {
+        $route = preg_replace('/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+/i', '', trim((string) $route));
+        $route = UrlSanitizer::sanitizePath(parse_url((string) $route, PHP_URL_PATH));
+        if ($route === '' || $route === false) {
+            return '/';
+        }
+        if ($route[0] !== '/') {
+            $route = '/' . $route;
+        }
+        return substr($route, 0, 512);
     }
 }

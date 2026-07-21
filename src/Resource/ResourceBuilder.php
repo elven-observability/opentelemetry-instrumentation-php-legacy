@@ -4,6 +4,8 @@ namespace Elven\Observability\PhpLegacy\Resource;
 
 use Elven\Observability\PhpLegacy\Config\ObservabilityConfig;
 use Elven\Observability\PhpLegacy\Observability;
+use Elven\Observability\PhpLegacy\Privacy\AttributeRedactor;
+use Elven\Observability\PhpLegacy\Support\TelemetryValueLimiter;
 
 final class ResourceBuilder
 {
@@ -38,11 +40,35 @@ final class ResourceBuilder
             $attributes['deployment.environment'] = $config->environment();
         }
 
-        return array_merge($config->resourceAttributes(), $attributes);
+        return array_merge(self::safeCustomAttributes($config), $attributes);
     }
 
     public static function version()
     {
         return Observability::VERSION;
+    }
+
+    private static function safeCustomAttributes(ObservabilityConfig $config)
+    {
+        $safe = array();
+        $redactor = new AttributeRedactor($config);
+        foreach ($config->resourceAttributes() as $key => $value) {
+            if (count($safe) >= 64) {
+                break;
+            }
+            $key = substr(trim((string) $key), 0, 255);
+            if ($key === '' || preg_match('/[\x00-\x1f\x7f]/', $key) === 1) {
+                continue;
+            }
+            try {
+                $value = TelemetryValueLimiter::limit($value, $config->maxAttributeLength());
+                $safe[$key] = TelemetryValueLimiter::limit(
+                    $redactor->redactValue($key, $value),
+                    $config->maxAttributeLength()
+                );
+            } catch (\Throwable $ignored) {
+            }
+        }
+        return $safe;
     }
 }

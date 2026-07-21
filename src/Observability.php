@@ -11,6 +11,7 @@ use Elven\Observability\PhpLegacy\Metrics\MetricFacade;
 use Elven\Observability\PhpLegacy\Privacy\AttributeRedactor;
 use Elven\Observability\PhpLegacy\Propagation\TraceContextPropagator;
 use Elven\Observability\PhpLegacy\Resource\ResourceBuilder;
+use Elven\Observability\PhpLegacy\Support\ShutdownRegistry;
 use Elven\Observability\PhpLegacy\Trace\NoopTracer;
 use Elven\Observability\PhpLegacy\Trace\Sampler\ParentBasedTraceIdRatioSampler;
 use Elven\Observability\PhpLegacy\Trace\SpanProcessor;
@@ -24,7 +25,7 @@ final class Observability
      * version). Keep this in sync with the composer package version / git tag
      * as part of the release checklist.
      */
-    const VERSION = '0.5.10';
+    const VERSION = '0.6.0';
 
     /** Instrumentation scope name reported on every exported signal. */
     const SCOPE_NAME = 'elven-observability-php-legacy';
@@ -35,6 +36,7 @@ final class Observability
     private static $logs;
     private static $context;
     private static $shutdownRegistered = false;
+    private static $debugFingerprint;
 
     private function __construct()
     {
@@ -43,6 +45,7 @@ final class Observability
     public static function init(array $config = array())
     {
         $resolved = EnvConfigResolver::resolve($config);
+        self::debugDiagnostic($resolved);
         if (self::$handle instanceof ObservabilityHandle) {
             if (!$config || self::$handle->config()->fingerprint() === $resolved->fingerprint()) {
                 self::refreshRootContext($resolved);
@@ -67,7 +70,9 @@ final class Observability
         $metricExporter = null;
         $traceExporter = null;
         $logExporter = null;
-        $metricsEnabled = $resolved->isEnabled() && strtolower($resolved->metricsExporter()) !== 'none';
+        $metricsEnabled = $resolved->isEnabled()
+            && strtolower($resolved->metricsExporter()) !== 'none'
+            && $resolved->metricsProtocol() === 'http/json';
         if ($metricsEnabled) {
             $metricExporter = new OtlpHttpJsonMetricExporter($resolved, $resource);
         }
@@ -79,10 +84,18 @@ final class Observability
             $resolved->maxMetricPointsPerRequest()
         );
 
-        if ($resolved->isEnabled() && strtolower($resolved->tracesExporter()) !== 'none') {
+        if (
+            $resolved->isEnabled()
+            && strtolower($resolved->tracesExporter()) !== 'none'
+            && $resolved->tracesProtocol() === 'http/json'
+        ) {
             $traceExporter = new OtlpHttpJsonTraceExporter($resolved, $resource);
         }
-        if ($resolved->isEnabled() && strtolower($resolved->logsExporter()) !== 'none') {
+        if (
+            $resolved->isEnabled()
+            && strtolower($resolved->logsExporter()) !== 'none'
+            && $resolved->logsProtocol() === 'http/json'
+        ) {
             $logExporter = new OtlpHttpJsonLogExporter($resolved, $resource);
         }
 
@@ -93,7 +106,18 @@ final class Observability
                 ? (new TraceContextPropagator())->extract($_SERVER)
                 : \Elven\Observability\PhpLegacy\Trace\SpanContext::invalid();
             $sampler = new ParentBasedTraceIdRatioSampler($resolved->samplerArg(), $resolved->sampler());
-            self::$tracer = new Tracer($sampler, $spanProcessor, $redactor, $rootParent);
+            self::$tracer = new Tracer(
+                $sampler,
+                $spanProcessor,
+                $redactor,
+                $rootParent,
+                array(
+                    'max_attributes' => $resolved->maxAttributesPerSpan(),
+                    'max_attribute_length' => $resolved->maxAttributeLength(),
+                    'max_events' => $resolved->maxEventsPerSpan(),
+                    'max_event_attributes' => $resolved->maxEventAttributes(),
+                )
+            );
         } else {
             self::$tracer = new NoopTracer();
         }
@@ -158,17 +182,32 @@ final class Observability
         return self::$handle instanceof ObservabilityHandle && self::$handle->config()->isEnabled();
     }
 
+    public static function config()
+    {
+        if (!self::$handle instanceof ObservabilityHandle) {
+            self::init();
+        }
+        return self::$handle->config();
+    }
+
     public static function shutdown()
     {
-        if (self::$handle instanceof ObservabilityHandle) {
-            $ok = self::$handle->shutdown();
-            if (method_exists(self::$tracer, 'clearActiveSpans')) {
-                self::$tracer->clearActiveSpans();
+        try {
+            ShutdownRegistry::run();
+            if (self::$handle instanceof ObservabilityHandle) {
+                $ok = self::$handle->shutdown();
+                if (is_object(self::$tracer) && method_exists(self::$tracer, 'clearActiveSpans')) {
+                    self::$tracer->clearActiveSpans();
+                }
+                if (is_object(self::$tracer) && method_exists(self::$tracer, 'setRootParentContext')) {
+                    self::$tracer->setRootParentContext(
+                        \Elven\Observability\PhpLegacy\Trace\SpanContext::invalid()
+                    );
+                }
+                return $ok;
             }
-            if (method_exists(self::$tracer, 'setRootParentContext')) {
-                self::$tracer->setRootParentContext(\Elven\Observability\PhpLegacy\Trace\SpanContext::invalid());
-            }
-            return $ok;
+        } catch (\Throwable $ignored) {
+            return false;
         }
         return true;
     }
@@ -179,6 +218,9 @@ final class Observability
         self::$tracer = null;
         self::$metrics = null;
         self::$logs = null;
+        self::$context = null;
+        self::$debugFingerprint = null;
+        ShutdownRegistry::resetForTests();
     }
 
     private static function refreshRootContext($resolved)
@@ -193,5 +235,20 @@ final class Observability
             ? (new TraceContextPropagator())->extract($_SERVER)
             : \Elven\Observability\PhpLegacy\Trace\SpanContext::invalid();
         self::$tracer->setRootParentContext($rootParent);
+    }
+
+    private static function debugDiagnostic($resolved)
+    {
+        try {
+            if (
+                $resolved->isDebug()
+                && $resolved->disabledReason() !== ''
+                && self::$debugFingerprint !== $resolved->fingerprint()
+            ) {
+                self::$debugFingerprint = $resolved->fingerprint();
+                error_log('[elven-otel] ' . $resolved->disabledReason());
+            }
+        } catch (\Throwable $ignored) {
+        }
     }
 }

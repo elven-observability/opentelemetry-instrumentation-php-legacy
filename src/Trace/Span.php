@@ -4,6 +4,7 @@ namespace Elven\Observability\PhpLegacy\Trace;
 
 use Elven\Observability\PhpLegacy\Privacy\AttributeRedactor;
 use Elven\Observability\PhpLegacy\Support\Clock;
+use Elven\Observability\PhpLegacy\Support\TelemetryValueLimiter;
 
 final class Span
 {
@@ -27,6 +28,12 @@ final class Span
     private $ended;
     private $onEnd;
     private $redactor;
+    private $maxAttributes;
+    private $maxAttributeLength;
+    private $maxEvents;
+    private $maxEventAttributes;
+    private $droppedAttributesCount;
+    private $droppedEventsCount;
 
     public function __construct(
         $name,
@@ -35,9 +42,10 @@ final class Span
         $kind,
         $sampled,
         AttributeRedactor $redactor,
-        $onEnd = null
+        $onEnd = null,
+        array $limits = array()
     ) {
-        $this->name = (string) $name;
+        $this->name = TelemetryValueLimiter::limit((string) $name, 255);
         $this->context = $context;
         $this->parentContext = $parentContext;
         $this->kind = (string) $kind;
@@ -51,6 +59,12 @@ final class Span
         $this->statusMessage = '';
         $this->ended = false;
         $this->onEnd = $onEnd;
+        $this->maxAttributes = self::limit($limits, 'max_attributes', 128);
+        $this->maxAttributeLength = self::limit($limits, 'max_attribute_length', 4096);
+        $this->maxEvents = self::limit($limits, 'max_events', 64);
+        $this->maxEventAttributes = self::limit($limits, 'max_event_attributes', 32);
+        $this->droppedAttributesCount = 0;
+        $this->droppedEventsCount = 0;
     }
 
     public function setAttribute($key, $value)
@@ -58,7 +72,17 @@ final class Span
         if ($this->ended) {
             return $this;
         }
-        $this->attributes[(string) $key] = $this->redactor->redactValue((string) $key, $value);
+        $key = substr((string) $key, 0, 255);
+        if ($key === '') {
+            return $this;
+        }
+        if (!array_key_exists($key, $this->attributes) && count($this->attributes) >= $this->maxAttributes) {
+            $this->droppedAttributesCount++;
+            return $this;
+        }
+        $limited = TelemetryValueLimiter::limit($value, $this->maxAttributeLength);
+        $redacted = $this->redactor->redactValue($key, $limited);
+        $this->attributes[$key] = TelemetryValueLimiter::limit($redacted, $this->maxAttributeLength);
         return $this;
     }
 
@@ -75,10 +99,32 @@ final class Span
         if ($this->ended) {
             return $this;
         }
+        if (count($this->events) >= $this->maxEvents) {
+            $this->droppedEventsCount++;
+            return $this;
+        }
+        $safeAttributes = array();
+        $count = 0;
+        foreach ($attributes as $key => $value) {
+            if ($count >= $this->maxEventAttributes) {
+                break;
+            }
+            $key = substr((string) $key, 0, 255);
+            if ($key === '') {
+                continue;
+            }
+            $limited = TelemetryValueLimiter::limit($value, $this->maxAttributeLength);
+            $safeAttributes[$key] = TelemetryValueLimiter::limit(
+                $this->redactor->redactValue($key, $limited),
+                $this->maxAttributeLength
+            );
+            $count++;
+        }
         $this->events[] = array(
-            'name' => (string) $name,
+            'name' => substr((string) $name, 0, 255),
             'timeUnixNano' => Clock::nowUnixNano(),
-            'attributes' => $this->redactor->redactAttributes($attributes),
+            'attributes' => $safeAttributes,
+            'droppedAttributesCount' => max(0, count($attributes) - count($safeAttributes)),
         );
         return $this;
     }
@@ -91,18 +137,25 @@ final class Span
             'exception.type' => $class,
             'exception.message' => $message,
         ));
+        $this->setAttribute('error.type', $class);
         $this->setStatus('ERROR', $class);
         return $this;
     }
 
     public function setStatus($code, $message = '')
     {
+        if ($this->ended) {
+            return $this;
+        }
         $code = strtoupper((string) $code);
         if (!in_array($code, array('UNSET', 'OK', 'ERROR'), true)) {
             $code = 'UNSET';
         }
         $this->statusCode = $code;
-        $this->statusMessage = (string) $this->redactor->redactValue('status.message', $message);
+        $this->statusMessage = (string) TelemetryValueLimiter::limit(
+            $this->redactor->redactValue('status.message', $message),
+            $this->maxAttributeLength
+        );
         return $this;
     }
 
@@ -114,7 +167,10 @@ final class Span
         $this->ended = true;
         $this->endTimeUnixNano = Clock::nowUnixNano();
         if (is_callable($this->onEnd)) {
-            call_user_func($this->onEnd, $this);
+            try {
+                call_user_func($this->onEnd, $this);
+            } catch (\Throwable $ignored) {
+            }
         }
     }
 
@@ -176,5 +232,20 @@ final class Span
     public function statusMessage()
     {
         return $this->statusMessage;
+    }
+
+    public function droppedAttributesCount()
+    {
+        return $this->droppedAttributesCount;
+    }
+
+    public function droppedEventsCount()
+    {
+        return $this->droppedEventsCount;
+    }
+
+    private static function limit(array $limits, $key, $default)
+    {
+        return isset($limits[$key]) && (int) $limits[$key] >= 0 ? (int) $limits[$key] : $default;
     }
 }

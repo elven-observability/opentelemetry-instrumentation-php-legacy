@@ -8,7 +8,9 @@ final class MongoInstrumentation
     {
         return DbInstrumentation::trace('Mongo ' . strtoupper((string) $operation), 'mongo', 'mongodb', array(
             'db.system' => 'mongodb',
+            'db.system.name' => 'mongodb',
             'db.name' => (string) $database,
+            'db.namespace' => (string) $database,
             'db.collection.name' => (string) $collection,
             'db.operation.name' => strtoupper((string) $operation),
             'dependency_type' => 'mongo',

@@ -10,7 +10,7 @@ use GuzzleHttp\HandlerStack;
 Observability::init(array('service_name' => 'guzzle-example'));
 
 $stack = HandlerStack::create();
-$stack->push(GuzzleInstrumentation::middleware());
+$stack->push(GuzzleInstrumentation::middleware(), 'elven.otel');
 
 $client = new Client(array('handler' => $stack));
 $response = $client->get('https://example.com/health');

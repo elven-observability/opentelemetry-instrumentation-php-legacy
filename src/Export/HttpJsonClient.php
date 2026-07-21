@@ -6,12 +6,14 @@ use Elven\Observability\PhpLegacy\Support\HeaderSanitizer;
 
 final class HttpJsonClient
 {
+    const MAX_SHARED_CIRCUIT_BREAKERS = 16;
+
     private $headers;
     private $timeoutMillis;
     private $circuitBreaker;
     private static $sharedCircuitBreakers = array();
 
-    public function __construct(array $headers, $timeoutMillis, CircuitBreaker $circuitBreaker = null)
+    public function __construct(array $headers, $timeoutMillis, ?CircuitBreaker $circuitBreaker = null)
     {
         $this->headers = $headers;
         $this->timeoutMillis = (int) $timeoutMillis;
@@ -26,7 +28,7 @@ final class HttpJsonClient
         }
 
         try {
-            $json = json_encode($payload);
+            $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
             if ($json === false) {
                 $circuitBreaker->recordFailure();
                 return false;
@@ -46,6 +48,9 @@ final class HttpJsonClient
     {
         $key = self::circuitBreakerKey($url);
         if (!isset(self::$sharedCircuitBreakers[$key])) {
+            if (count(self::$sharedCircuitBreakers) >= self::MAX_SHARED_CIRCUIT_BREAKERS) {
+                return new CircuitBreaker();
+            }
             self::$sharedCircuitBreakers[$key] = new CircuitBreaker();
         }
         return self::$sharedCircuitBreakers[$key];
@@ -72,15 +77,20 @@ final class HttpJsonClient
         }
         curl_setopt($handle, CURLOPT_POST, true);
         curl_setopt($handle, CURLOPT_POSTFIELDS, $json);
-        curl_setopt($handle, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($handle, CURLOPT_RETURNTRANSFER, false);
         curl_setopt($handle, CURLOPT_HEADER, false);
+        curl_setopt($handle, CURLOPT_WRITEFUNCTION, function ($curl, $data) {
+            return strlen($data);
+        });
         curl_setopt($handle, CURLOPT_HTTPHEADER, $this->headerLines());
         curl_setopt($handle, CURLOPT_TIMEOUT_MS, $this->timeoutMillis);
         curl_setopt($handle, CURLOPT_CONNECTTIMEOUT_MS, $this->timeoutMillis);
         curl_exec($handle);
         $errno = curl_errno($handle);
         $status = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
-        curl_close($handle);
+        if (PHP_VERSION_ID < 80500) {
+            curl_close($handle);
+        }
         return $errno === 0 && $status >= 200 && $status < 300;
     }
 
@@ -96,11 +106,16 @@ final class HttpJsonClient
                 'ignore_errors' => true,
             ),
         ));
-        $result = @file_get_contents($url, false, $context);
-        if ($result === false || !isset($http_response_header[0])) {
+        $stream = @fopen($url, 'rb', false, $context);
+        if ($stream === false) {
             return false;
         }
-        return preg_match('#HTTP/\\S+\\s+2\\d\\d#', $http_response_header[0]) === 1;
+        $metadata = stream_get_meta_data($stream);
+        fclose($stream);
+        $headers = isset($metadata['wrapper_data']) && is_array($metadata['wrapper_data'])
+            ? $metadata['wrapper_data']
+            : array();
+        return isset($headers[0]) && preg_match('#HTTP/\\S+\\s+2\\d\\d#', $headers[0]) === 1;
     }
 
     private function headerLines()

@@ -32,12 +32,18 @@ final class OtlpAttributes
             return array('intValue' => (string) $value);
         }
         if (is_float($value)) {
+            if (is_nan($value)) {
+                return array('doubleValue' => 'NaN');
+            }
+            if (is_infinite($value)) {
+                return array('doubleValue' => $value > 0 ? 'Infinity' : '-Infinity');
+            }
             return array('doubleValue' => $value);
         }
         if (is_array($value)) {
             $values = array();
             foreach ($value as $item) {
-                if (is_scalar($item) || $item === null) {
+                if (is_scalar($item)) {
                     $values[] = self::value($item);
                 }
             }

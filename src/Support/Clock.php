@@ -11,9 +11,12 @@ final class Clock
     public static function nowUnixNano()
     {
         $parts = explode(' ', microtime());
-        $fraction = isset($parts[0]) ? (float) $parts[0] : 0.0;
-        $seconds = isset($parts[1]) ? (int) $parts[1] : time();
-        $nanos = ($seconds * 1000000000) + (int) round($fraction * 1000000000);
-        return (string) $nanos;
+        $seconds = isset($parts[1]) && preg_match('/^\d+$/', $parts[1]) === 1
+            ? ltrim($parts[1], '0')
+            : (string) time();
+        $seconds = $seconds === '' ? '0' : $seconds;
+        $fraction = isset($parts[0]) ? preg_replace('/\D/', '', substr($parts[0], 2)) : '';
+        $nanoseconds = str_pad(substr((string) $fraction, 0, 9), 9, '0');
+        return $seconds . $nanoseconds;
     }
 }

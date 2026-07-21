@@ -16,7 +16,7 @@ final class SpanContext
         $this->traceId = strtolower((string) $traceId);
         $this->spanId = strtolower((string) $spanId);
         $this->traceFlags = strtolower((string) $traceFlags);
-        $this->traceState = (string) $traceState;
+        $this->traceState = self::sanitizeTraceState($traceState);
         $this->remote = (bool) $remote;
         $this->valid = (bool) $valid
             && self::isValidTraceId($this->traceId)
@@ -85,5 +85,26 @@ final class SpanContext
             return '';
         }
         return '00-' . $this->traceId . '-' . $this->spanId . '-' . $this->traceFlags;
+    }
+
+    private static function sanitizeTraceState($traceState)
+    {
+        $traceState = trim((string) $traceState);
+        if ($traceState === '' || strlen($traceState) > 512 || preg_match('/[\x00-\x20\x7f]/', $traceState)) {
+            return '';
+        }
+        $members = explode(',', $traceState);
+        if (count($members) > 32) {
+            return '';
+        }
+        $safeMembers = array();
+        foreach ($members as $member) {
+            $member = trim($member);
+            if (preg_match('/^[a-z0-9][a-z0-9_\-*\/]{0,255}(?:@[a-z0-9][a-z0-9_\-*\/]{0,13})?=[\x21-\x2b\x2d-\x3c\x3e-\x7e]{1,256}$/', $member) !== 1) {
+                return '';
+            }
+            $safeMembers[] = $member;
+        }
+        return implode(',', $safeMembers);
     }
 }

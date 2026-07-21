@@ -9,21 +9,25 @@ Provide production-safe OpenTelemetry-compatible instrumentation for PHP legacy 
 The library is intentionally small and explicit:
 
 - `Config\EnvConfigResolver` resolves explicit init options, environment variables, and defaults. `ELVEN_OTEL_ENABLED=false` is the one precedence exception: it is a total runtime kill switch and always wins.
-- `Resource\ResourceBuilder` creates stable service, runtime, host, process, and deployment attributes.
+- `Resource\ResourceBuilder` creates bounded service, runtime, host, and deployment attributes. It deliberately omits per-worker `process.pid` to avoid PHP-FPM metric cardinality.
 - `Propagation\TraceContextPropagator` implements W3C `traceparent`/`tracestate`.
 - `Propagation\BaggagePropagator` implements bounded basic baggage.
 - `Trace\Tracer`, `Trace\Span`, and `Trace\SpanProcessor` manage active spans, nesting, sampling, limits, and request-local flushing.
+- `Support\ShutdownRegistry` and `Instrumentation\ServerRequestScope` finalize legacy HTTP requests that terminate via `exit`/`die` before exporter shutdown.
 - `Trace\Sampler\ParentBasedTraceIdRatioSampler` implements `parentbased_traceidratio`, `always_on`, and `always_off`.
 - `Attribution\TrafficSourceResolver` maps request UTM/source/referrer hints into bounded `traffic_source` and `traffic_channel` labels.
 - `Export\OtlpHttpJsonTraceExporter`, `Export\OtlpHttpJsonMetricExporter`, and `Export\OtlpHttpJsonLogExporter` encode OTLP JSON and send HTTP POSTs to Collector endpoints.
 - `Metrics\MetricFacade` provides counters, histograms, and gauges with low-cardinality label enforcement.
 - `Logs\MonologTraceProcessor` adds correlation fields to existing logs, while `Logs\MonologOtlpHandler` and `Logs\LogsFacade` can emit bounded OTLP log records.
 - `Privacy` classes redact sensitive attributes, URLs, and DB statements by default, with an explicit customer-owned opt-out switch.
-- `Instrumentation` classes provide manual opt-in wrappers for HTTP server/client, cURL, Guzzle, SOAP/WCF, DB, Redis, Memcached, Mongo, AMQP, mail, AWS, and search clients.
+- `Bridge\Legacy\FrontControllerInstrumentation` builds bounded route templates from an application-owned route map.
+- `Instrumentation` classes provide manual opt-in wrappers for HTTP server/client, cURL, Guzzle 6/7, SOAP/WCF, DB, Redis, Memcached, Mongo, AMQP, mail, AWS SDK v3, search clients, cache reads, and CLI jobs.
 
 ## Lifecycle
 
 `Observability::init()` is idempotent for identical config and reinitializes safely when explicit config changes, flushing the previous handle first. It registers one shutdown function, resolves config, builds resources, creates exporters, refreshes incoming W3C context from `$_SERVER` when no span is active, and returns an `ObservabilityHandle`.
+
+The HTTP SERVER entrypoint resets request baggage before extracting inbound context. The shutdown hook runs registered request finalizers first and exporters second. This ordering prevents an open root span when a legacy response helper terminates the request.
 
 `forceFlush()` flushes ended spans first, OTLP log records second, and metrics last, returning `false` when any exporter fails. Metrics are last so log-export failures can still be reported through `elven.php.exporter.failed_exports`. Failed span/log exports are retained in bounded request-local buffers for a later retry, and exporter failures are counted as internal metrics. `shutdown()` records peak memory, calls `forceFlush()`, clears active span scope, and invalidates stale root context.
 
@@ -33,24 +37,25 @@ OTLP HTTP/JSON is the v1 wire format because it is supported by the OTLP spec an
 
 Metrics are accumulated in request-local memory, then exported at shutdown. Counters and histograms default to OTLP `AGGREGATION_TEMPORALITY_CUMULATIVE` because common Collector pipelines that forward to Mimir through `prometheusremotewrite` reject or drop delta sums/histograms during translation. Customers with an explicit delta-compatible Collector pipeline can set `ELVEN_OTEL_METRICS_TEMPORALITY=delta`.
 
-The app should export to a customer/local Collector. The application does not need Elven backend credentials when using that path. Logs are not sent directly to Loki from PHP; the Collector owns the Loki exporter/routing and any backend credentials.
+Each signal resolves its own endpoint and protocol. Only `http/json` is implemented; an unsupported signal protocol disables that exporter without disabling other supported signals. The app should export to a customer/local Collector. The application does not need Elven backend credentials when using that path. Logs are not sent directly to Loki from PHP; the Collector owns the Loki exporter/routing and any backend credentials.
 
 ## Privacy Strategy
 
 The library never captures request bodies, response bodies, SOAP XML, raw message payloads, raw Redis keys, raw Mongo queries, raw Elasticsearch queries, or raw DB statements by default.
 
-Sensitive headers, paths, query values, exception messages, log body text, log attributes, and baggage values are redacted before storage/export. Explicit user identifiers are hashed. `ELVEN_OTEL_REDACTION_ENABLED=false` deliberately disables library-side value redaction for customers that own redaction and access control downstream. Metric labels are always allowlisted, normalized, and bounded to prevent accidental cardinality explosions, even when value redaction is disabled.
+Sensitive headers, paths, query values, exception messages, log body text, log attributes, and baggage values are redacted before storage/export. Explicit user identifiers are hashed. Raw tenant/user identifiers are rejected from baggage; a 32-hex pseudonym produced by `IdentifierHasher` can propagate. `ELVEN_OTEL_REDACTION_ENABLED=false` deliberately disables library-side value redaction for customers that own redaction and access control downstream. Metric labels are always allowlisted, enum-normalized, bounded, and protected against opaque high-cardinality values even when value redaction is disabled.
 
 Traffic attribution is intentionally categorical. Values such as click ids, redirect ids, session ids, campaigns, raw referrers, or partner payload ids are never valid metric labels; applications should resolve those to stable categories before calling `MetricFacade::setRequestAttributes()`.
 
 ## Failure Model
 
-Telemetry must not break the application. The exporter uses short timeouts, catches all throwables, sanitizes outgoing headers, returns failure status instead of throwing, and includes a circuit breaker. Unsupported `http/protobuf` disables telemetry safely instead of attempting a risky partial implementation.
+Telemetry must not break the application. Span creation, processors, instrumentation callbacks, correlation, and exporters catch telemetry-owned failures while preserving the application's original return values and throwable identity. The exporter uses short timeouts, TLS verification from the PHP transport defaults, sanitized outgoing headers, failure status instead of exceptions, and a per-endpoint circuit breaker. Unsupported `http/protobuf` is never sent as JSON.
 
 ## Tradeoffs
 
-- Manual wrappers are used instead of auto-instrumentation because the target app is Slim 2/custom legacy PHP.
+- Manual central wrappers are used instead of native auto-instrumentation because PHP 7.3/7.4 cannot observe arbitrary calls without PECL.
 - Metrics are request-local aggregates exported as cumulative OTLP by default for Prometheus remote write compatibility. This accepts per-worker/request resets as the practical tradeoff for PHP-FPM and avoids losing counters/histograms in Mimir.
 - OTLP log export is opt-in because many legacy apps already ship logs through file/stdout agents; enabling both paths can duplicate Loki entries.
-- Long-running workers must call `init()` and `shutdown()` per logical request/job. The singleton API remains PHP-FPM-friendly, but request context is explicitly refreshed to avoid cross-request trace leakage.
+- Long-running workers must reset context and create/end spans per logical message; `CliInstrumentation` can flush at job exit. The singleton API remains PHP-FPM-friendly, but request context is explicitly reset to avoid cross-tenant leakage.
+- AWS SDK middleware must execute after request serialization and before SigV4. `AwsInstrumentation::register()` uses the SDK's sign-stage ordering and removes duplicate registrations.
 - Official SDK adapter is deferred until target apps can run a compatible PHP version.

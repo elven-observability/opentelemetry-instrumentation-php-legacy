@@ -34,6 +34,27 @@ final class PrivacyTest extends TestCase
         self::assertSame('SELECT users', DbStatementSanitizer::summary($sql));
     }
 
+    public function testDbStatementSanitizerHandlesEscapesCommentsAndDialectLiterals(): void
+    {
+        $sql = "SELECT * FROM users WHERE note='private\\'value' AND token=\$tag\$secret-value\$tag\$ "
+            . "AND fingerprint=0xDEADBEEF AND score=1.5e10 # private-comment";
+
+        $sanitized = DbStatementSanitizer::sanitize($sql);
+        self::assertSame(
+            'SELECT * FROM users WHERE note=? AND token=? AND fingerprint=? AND score=?',
+            $sanitized
+        );
+        self::assertStringNotContainsString('private', $sanitized);
+        self::assertStringNotContainsString('secret-value', $sanitized);
+
+        self::assertSame('SELECT * FROM users WHERE token=?', DbStatementSanitizer::sanitize(
+            "SELECT * FROM users WHERE token='unterminated-secret"
+        ));
+        self::assertSame('SELECT * FROM users', DbStatementSanitizer::sanitize(
+            'SELECT * FROM users /* unterminated private comment'
+        ));
+    }
+
     public function testAttributeRedactorHashesUserAndRedactsTokens(): void
     {
         $redactor = new AttributeRedactor(EnvConfigResolver::resolve());
@@ -48,6 +69,12 @@ final class PrivacyTest extends TestCase
         self::assertSame('google_flights', $redactor->redactMetricLabels(array(
             'traffic_source' => 'Google Flights',
         ), array('traffic_source'))['traffic_source']);
+        self::assertSame('other', $redactor->redactMetricLabels(array(
+            'cache_name' => 'customer-ABCD1234EFGH5678',
+        ), array('cache_name'))['cache_name']);
+        self::assertSame('other', $redactor->redactMetricLabels(array(
+            'result' => 'customer-specific-result',
+        ), array('result'))['result']);
     }
 
     public function testKeyPlanMemoizationStillScansEachValueAndStaysConsistent(): void
