@@ -64,7 +64,7 @@ jobs:
           tools: composer:v2
 
       - name: Install with Guzzle 6
-        run: composer update guzzlehttp/guzzle:6.5.8 --with-all-dependencies --no-interaction --prefer-dist --no-security-blocking
+        run: composer require --dev guzzlehttp/guzzle:6.5.8 --with-all-dependencies --no-interaction --prefer-dist --no-security-blocking
 
       - name: Run Guzzle and AWS middleware tests
         run: vendor/bin/phpunit tests/Unit/AdvancedInstrumentationTest.php
@@ -83,7 +83,7 @@ jobs:
           tools: composer:v2
 
       - name: Install with Monolog 1
-        run: composer update monolog/monolog:1.27.1 --with-all-dependencies --no-interaction --prefer-dist
+        run: composer require --dev monolog/monolog:1.27.1 --with-all-dependencies --no-interaction --prefer-dist
 
       - name: Run Monolog 1 tests
         run: vendor/bin/phpunit tests/Unit/LogsAndInstrumentationTest.php
