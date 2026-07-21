@@ -114,7 +114,7 @@ Use `AwsInstrumentation::register($client, 'service')`, not a custom build-stage
 
 ## Large latency only when Collector is unavailable
 
-Keep the Collector local and the export timeout near `200ms`. Three enabled signals flush sequentially, so large timeouts multiply request-shutdown delay before circuit breakers open. Use the kill switch during an incident.
+Keep the Collector local and the export timeout near `200ms`. Three enabled signals flush sequentially, so large timeouts multiply the first failing request's shutdown delay before the shared Collector-origin breaker opens. Confirm that PHP can write to `sys_get_temp_dir()` so breaker state coordinates PHP-FPM workers. Use the kill switch during an incident.
 
 ## Composer platform failures
 

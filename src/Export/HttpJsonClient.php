@@ -22,41 +22,64 @@ final class HttpJsonClient
 
     public function post($url, array $payload)
     {
-        $circuitBreaker = $this->circuitBreaker ?: self::sharedCircuitBreaker($url);
-        if (!$circuitBreaker->allowRequest()) {
+        $endpointCircuitBreaker = $this->circuitBreaker
+            ?: self::sharedCircuitBreaker('endpoint:' . self::endpointKey($url));
+        $originCircuitBreaker = $this->circuitBreaker
+            ?: self::sharedCircuitBreaker('origin:' . self::originKey($url));
+        if (!$endpointCircuitBreaker->allowRequest()) {
+            return false;
+        }
+        if ($originCircuitBreaker !== $endpointCircuitBreaker && !$originCircuitBreaker->allowRequest()) {
             return false;
         }
 
         try {
             $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
             if ($json === false) {
-                $circuitBreaker->recordFailure();
+                $endpointCircuitBreaker->recordFailure();
                 return false;
             }
-            $ok = function_exists('curl_init')
+            $result = function_exists('curl_init')
                 ? $this->postWithCurl($url, $json)
                 : $this->postWithStream($url, $json);
-            $ok ? $circuitBreaker->recordSuccess() : $circuitBreaker->recordFailure();
-            return $ok;
+            if ($result['ok']) {
+                $endpointCircuitBreaker->recordSuccess();
+                if ($originCircuitBreaker !== $endpointCircuitBreaker) {
+                    $originCircuitBreaker->recordSuccess();
+                }
+                return true;
+            }
+
+            $endpointCircuitBreaker->recordFailure();
+            if ($originCircuitBreaker !== $endpointCircuitBreaker) {
+                if ($result['origin_failure']) {
+                    $originCircuitBreaker->recordFailure();
+                } else {
+                    $originCircuitBreaker->recordSuccess();
+                }
+            }
+            return false;
         } catch (\Throwable $e) {
-            $circuitBreaker->recordFailure();
+            $endpointCircuitBreaker->recordFailure();
+            if ($originCircuitBreaker !== $endpointCircuitBreaker) {
+                $originCircuitBreaker->recordFailure();
+            }
             return false;
         }
     }
 
-    private static function sharedCircuitBreaker($url)
+    private static function sharedCircuitBreaker($key)
     {
-        $key = self::circuitBreakerKey($url);
         if (!isset(self::$sharedCircuitBreakers[$key])) {
             if (count(self::$sharedCircuitBreakers) >= self::MAX_SHARED_CIRCUIT_BREAKERS) {
-                return new CircuitBreaker();
+                return new CircuitBreaker(3, 30000, $key);
             }
-            self::$sharedCircuitBreakers[$key] = new CircuitBreaker();
+            self::$sharedCircuitBreakers[$key] = new CircuitBreaker(3, 30000, $key);
         }
         return self::$sharedCircuitBreakers[$key];
     }
 
-    private static function circuitBreakerKey($url)
+    private static function endpointKey($url)
     {
         $parts = @parse_url((string) $url);
         if (!is_array($parts)) {
@@ -67,6 +90,18 @@ final class HttpJsonClient
         $port = isset($parts['port']) ? ':' . (string) $parts['port'] : '';
         $path = isset($parts['path']) ? (string) $parts['path'] : '';
         return $scheme . '://' . $host . $port . $path;
+    }
+
+    private static function originKey($url)
+    {
+        $parts = @parse_url((string) $url);
+        if (!is_array($parts)) {
+            return (string) $url;
+        }
+        $scheme = isset($parts['scheme']) ? strtolower((string) $parts['scheme']) : 'http';
+        $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
+        $port = isset($parts['port']) ? ':' . (string) $parts['port'] : '';
+        return $scheme . '://' . $host . $port;
     }
 
     private function postWithCurl($url, $json)
@@ -91,7 +126,10 @@ final class HttpJsonClient
         if (PHP_VERSION_ID < 80500) {
             curl_close($handle);
         }
-        return $errno === 0 && $status >= 200 && $status < 300;
+        return array(
+            'ok' => $errno === 0 && $status >= 200 && $status < 300,
+            'origin_failure' => $errno !== 0 || $status === 0 || $status === 408 || $status === 429 || $status >= 500,
+        );
     }
 
     private function postWithStream($url, $json)
@@ -108,14 +146,21 @@ final class HttpJsonClient
         ));
         $stream = @fopen($url, 'rb', false, $context);
         if ($stream === false) {
-            return false;
+            return array('ok' => false, 'origin_failure' => true);
         }
         $metadata = stream_get_meta_data($stream);
         fclose($stream);
         $headers = isset($metadata['wrapper_data']) && is_array($metadata['wrapper_data'])
             ? $metadata['wrapper_data']
             : array();
-        return isset($headers[0]) && preg_match('#HTTP/\\S+\\s+2\\d\\d#', $headers[0]) === 1;
+        $status = 0;
+        if (isset($headers[0]) && preg_match('#HTTP/\\S+\\s+(\\d{3})#', $headers[0], $matches) === 1) {
+            $status = (int) $matches[1];
+        }
+        return array(
+            'ok' => $status >= 200 && $status < 300,
+            'origin_failure' => $status === 0 || $status === 408 || $status === 429 || $status >= 500,
+        );
     }
 
     private function headerLines()

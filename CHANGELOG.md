@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1 - 2026-07-21
+
+- Made exporter circuit-breaker state survive PHP-FPM request boundaries and coordinate across workers through a small locked state file in the effective runtime user's private temporary directory.
+- Added separate endpoint and Collector-origin breakers: endpoint-specific 4xx failures do not suppress healthy signals, while connection failures, throttling, timeouts, and 5xx responses are shared across traces, metrics, and logs.
+- Added half-open probe reservation to prevent a Collector recovery stampede and regression tests for shared state, signal-path coordination, and recovery.
+
 ## 0.6.0 - 2026-07-20
 
 - Added exit-safe `ServerRequestScope` and route-map-based `FrontControllerInstrumentation` for custom PHP 7.4 applications whose response helpers terminate through `exit`/`die`.

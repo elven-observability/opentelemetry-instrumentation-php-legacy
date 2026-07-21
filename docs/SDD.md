@@ -49,7 +49,7 @@ Traffic attribution is intentionally categorical. Values such as click ids, redi
 
 ## Failure Model
 
-Telemetry must not break the application. Span creation, processors, instrumentation callbacks, correlation, and exporters catch telemetry-owned failures while preserving the application's original return values and throwable identity. The exporter uses short timeouts, TLS verification from the PHP transport defaults, sanitized outgoing headers, failure status instead of exceptions, and a per-endpoint circuit breaker. Unsupported `http/protobuf` is never sent as JSON.
+Telemetry must not break the application. Span creation, processors, instrumentation callbacks, correlation, and exporters catch telemetry-owned failures while preserving the application's original return values and throwable identity. The exporter uses short timeouts, TLS verification from the PHP transport defaults, sanitized outgoing headers, and endpoint plus Collector-origin circuit breakers. Breaker state is stored as bounded, non-sensitive JSON under the effective runtime user's private temporary directory and guarded with `flock`, so it survives PHP-FPM request boundaries and coordinates workers. If the temporary directory is unavailable, the breaker safely falls back to request-local memory. Unsupported `http/protobuf` is never sent as JSON.
 
 ## Tradeoffs
 

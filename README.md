@@ -472,7 +472,7 @@ var_dump(getenv('OTEL_EXPORTER_OTLP_ENDPOINT'));
 
 If CLI sees env vars and HTTP does not, fix the PHP-FPM pool allowlist. If traces work but metrics do not, verify the signal-specific endpoint/protocol and Collector metrics pipeline. If OTLP logs are enabled but absent, verify the application actually calls `MonologOtlpHandler` or `logs()->emit()`.
 
-Collector failure never throws into the application. Export timeout is bounded to 30 seconds, defaults to 200ms, and a shared circuit breaker reduces repeated calls while the endpoint is unavailable.
+Collector failure never throws into the application. Export timeout is bounded to 30 seconds, defaults to 200ms, and endpoint plus Collector-origin circuit breakers suppress repeated failures across PHP-FPM requests and workers. Their bounded state contains no telemetry and lives in the effective runtime user's private temporary directory; keep `sys_get_temp_dir()` writable.
 
 ## Documentation
 
