@@ -8,10 +8,13 @@ final class MonologTraceProcessor
 {
     public function __invoke(array $record)
     {
-        if (!isset($record['extra']) || !is_array($record['extra'])) {
-            $record['extra'] = array();
+        try {
+            if (!isset($record['extra']) || !is_array($record['extra'])) {
+                $record['extra'] = array();
+            }
+            $record['extra'] = Observability::logs()->correlate($record['extra']);
+        } catch (\Throwable $ignored) {
         }
-        $record['extra'] = Observability::logs()->correlate($record['extra']);
         return $record;
     }
 }

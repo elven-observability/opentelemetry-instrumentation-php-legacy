@@ -12,6 +12,21 @@ final class EnvConfigResolver
     {
         $endpoint = self::string($explicit, 'endpoint', self::env('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://localhost:4318'));
         $protocol = strtolower(self::string($explicit, 'protocol', self::env('OTEL_EXPORTER_OTLP_PROTOCOL', 'http/json')));
+        $tracesProtocol = strtolower(self::string(
+            $explicit,
+            'traces_protocol',
+            self::env('OTEL_EXPORTER_OTLP_TRACES_PROTOCOL', $protocol)
+        ));
+        $metricsProtocol = strtolower(self::string(
+            $explicit,
+            'metrics_protocol',
+            self::env('OTEL_EXPORTER_OTLP_METRICS_PROTOCOL', $protocol)
+        ));
+        $logsProtocol = strtolower(self::string(
+            $explicit,
+            'logs_protocol',
+            self::env('OTEL_EXPORTER_OTLP_LOGS_PROTOCOL', $protocol)
+        ));
         $tracesEndpoint = self::string(
             $explicit,
             'traces_endpoint',
@@ -35,12 +50,19 @@ final class EnvConfigResolver
             $enabled = false;
             $disabledReasons[] = 'ELVEN_OTEL_ENABLED=false';
         }
-        if ($protocol !== 'http/json') {
-            $enabled = false;
-            $disabledReasons[] = sprintf(
-                'OTLP protocol "%s" is not supported by this PHP legacy v1; use http/json.',
-                $protocol
-            );
+        $signalProtocols = array(
+            'traces' => $tracesProtocol,
+            'metrics' => $metricsProtocol,
+            'logs' => $logsProtocol,
+        );
+        foreach ($signalProtocols as $signal => $signalProtocol) {
+            if ($signalProtocol !== 'http/json') {
+                $disabledReasons[] = sprintf(
+                    'OTLP %s protocol "%s" is unsupported; that signal is disabled. Use http/json.',
+                    $signal,
+                    $signalProtocol
+                );
+            }
         }
 
         $environment = self::string(
@@ -68,8 +90,17 @@ final class EnvConfigResolver
             'metrics_endpoint' => $metricsEndpoint,
             'logs_endpoint' => $logsEndpoint,
             'protocol' => $protocol,
+            'traces_protocol' => $tracesProtocol,
+            'metrics_protocol' => $metricsProtocol,
+            'logs_protocol' => $logsProtocol,
             'headers' => array_merge(self::parseKeyValueList(self::env('OTEL_EXPORTER_OTLP_HEADERS', '')), self::arrayValue($explicit, 'headers')),
-            'timeout_millis' => self::int($explicit, 'timeout_millis', self::env('ELVEN_OTEL_EXPORT_TIMEOUT_MS', self::env('OTEL_EXPORTER_OTLP_TIMEOUT', '200')), 1),
+            'timeout_millis' => self::int(
+                $explicit,
+                'timeout_millis',
+                self::env('ELVEN_OTEL_EXPORT_TIMEOUT_MS', self::env('OTEL_EXPORTER_OTLP_TIMEOUT', '200')),
+                1,
+                30000
+            ),
             'propagators' => self::listValue(self::string($explicit, 'propagators', self::env('OTEL_PROPAGATORS', 'tracecontext,baggage'))),
             'traces_exporter' => self::string($explicit, 'traces_exporter', self::env('OTEL_TRACES_EXPORTER', 'otlp')),
             'metrics_exporter' => self::string($explicit, 'metrics_exporter', self::env('OTEL_METRICS_EXPORTER', 'otlp')),
@@ -89,18 +120,54 @@ final class EnvConfigResolver
             'capture_db_statement' => self::bool($explicit, 'capture_db_statement', self::env('ELVEN_OTEL_CAPTURE_DB_STATEMENT', 'false')),
             'redact_db_statement' => self::bool($explicit, 'redact_db_statement', self::env('ELVEN_OTEL_REDACT_DB_STATEMENT', 'true')),
             'allow_raw_attributes' => self::listValue(self::string($explicit, 'allow_raw_attributes', self::env('ELVEN_OTEL_ALLOW_RAW_ATTRIBUTES', ''))),
-            'max_spans_per_request' => self::int($explicit, 'max_spans_per_request', self::env('ELVEN_OTEL_MAX_SPANS_PER_REQUEST', '128'), 1),
+            'max_spans_per_request' => self::int(
+                $explicit,
+                'max_spans_per_request',
+                self::env('ELVEN_OTEL_MAX_SPANS_PER_REQUEST', '128'),
+                1,
+                2048
+            ),
             'max_metric_points_per_request' => self::int(
                 $explicit,
                 'max_metric_points_per_request',
                 self::env('ELVEN_OTEL_MAX_METRIC_POINTS_PER_REQUEST', '512'),
-                1
+                1,
+                4096
             ),
             'max_log_records_per_request' => self::int(
                 $explicit,
                 'max_log_records_per_request',
                 self::env('ELVEN_OTEL_MAX_LOG_RECORDS_PER_REQUEST', '512'),
-                1
+                1,
+                4096
+            ),
+            'max_attributes_per_span' => self::int(
+                $explicit,
+                'max_attributes_per_span',
+                self::env('ELVEN_OTEL_MAX_ATTRIBUTES_PER_SPAN', '128'),
+                1,
+                256
+            ),
+            'max_attribute_length' => self::int(
+                $explicit,
+                'max_attribute_length',
+                self::env('ELVEN_OTEL_MAX_ATTRIBUTE_LENGTH', '4096'),
+                16,
+                16384
+            ),
+            'max_events_per_span' => self::int(
+                $explicit,
+                'max_events_per_span',
+                self::env('ELVEN_OTEL_MAX_EVENTS_PER_SPAN', '64'),
+                0,
+                256
+            ),
+            'max_event_attributes' => self::int(
+                $explicit,
+                'max_event_attributes',
+                self::env('ELVEN_OTEL_MAX_EVENT_ATTRIBUTES', '32'),
+                0,
+                128
             ),
         ));
     }
@@ -111,7 +178,10 @@ final class EnvConfigResolver
         foreach (self::listValue($value) as $part) {
             $pieces = explode('=', $part, 2);
             if (count($pieces) === 2 && trim($pieces[0]) !== '') {
-                $result[trim($pieces[0])] = trim($pieces[1]);
+                $key = rawurldecode(trim($pieces[0]));
+                if ($key !== '') {
+                    $result[$key] = rawurldecode(trim($pieces[1]));
+                }
             }
         }
         return $result;
@@ -120,8 +190,10 @@ final class EnvConfigResolver
     private static function signalEndpoint($endpoint, $signal)
     {
         $endpoint = rtrim($endpoint, '/');
-        if (preg_match('#/v1/(traces|metrics|logs)$#', $endpoint)) {
-            return $endpoint;
+        if (preg_match('#/v1/(traces|metrics|logs)$#', $endpoint, $matches)) {
+            return $matches[1] === $signal
+                ? $endpoint
+                : preg_replace('#/v1/(traces|metrics|logs)$#', '/v1/' . $signal, $endpoint);
         }
         return $endpoint . '/v1/' . $signal;
     }
@@ -178,11 +250,17 @@ final class EnvConfigResolver
         return in_array(strtolower(trim((string) $value)), array('1', 'true', 'yes', 'on'), true);
     }
 
-    private static function int(array $explicit, $key, $default, $min)
+    private static function int(array $explicit, $key, $default, $min, $max = null)
     {
         $value = array_key_exists($key, $explicit) ? $explicit[$key] : $default;
         $parsed = (int) $value;
-        return $parsed >= $min ? $parsed : $min;
+        if ($parsed < $min) {
+            return $min;
+        }
+        if ($max !== null && $parsed > $max) {
+            return $max;
+        }
+        return $parsed;
     }
 
     private static function float(array $explicit, $key, $default, $min, $max)

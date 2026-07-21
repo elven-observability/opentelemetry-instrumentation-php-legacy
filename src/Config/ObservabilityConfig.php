@@ -17,6 +17,9 @@ final class ObservabilityConfig
     private $metricsEndpoint;
     private $logsEndpoint;
     private $protocol;
+    private $tracesProtocol;
+    private $metricsProtocol;
+    private $logsProtocol;
     private $headers;
     private $timeoutMillis;
     private $propagators;
@@ -34,6 +37,10 @@ final class ObservabilityConfig
     private $maxSpansPerRequest;
     private $maxMetricPointsPerRequest;
     private $maxLogRecordsPerRequest;
+    private $maxAttributesPerSpan;
+    private $maxAttributeLength;
+    private $maxEventsPerSpan;
+    private $maxEventAttributes;
     private $fingerprint;
 
     public function __construct(array $values)
@@ -51,6 +58,9 @@ final class ObservabilityConfig
         $this->metricsEndpoint = (string) $values['metrics_endpoint'];
         $this->logsEndpoint = (string) $values['logs_endpoint'];
         $this->protocol = (string) $values['protocol'];
+        $this->tracesProtocol = (string) $values['traces_protocol'];
+        $this->metricsProtocol = (string) $values['metrics_protocol'];
+        $this->logsProtocol = (string) $values['logs_protocol'];
         $this->headers = (array) $values['headers'];
         $this->timeoutMillis = (int) $values['timeout_millis'];
         $this->propagators = (array) $values['propagators'];
@@ -68,6 +78,10 @@ final class ObservabilityConfig
         $this->maxSpansPerRequest = (int) $values['max_spans_per_request'];
         $this->maxMetricPointsPerRequest = (int) $values['max_metric_points_per_request'];
         $this->maxLogRecordsPerRequest = (int) $values['max_log_records_per_request'];
+        $this->maxAttributesPerSpan = (int) $values['max_attributes_per_span'];
+        $this->maxAttributeLength = (int) $values['max_attribute_length'];
+        $this->maxEventsPerSpan = (int) $values['max_events_per_span'];
+        $this->maxEventAttributes = (int) $values['max_event_attributes'];
         $this->fingerprint = $this->buildFingerprint();
     }
 
@@ -134,6 +148,21 @@ final class ObservabilityConfig
     public function protocol()
     {
         return $this->protocol;
+    }
+
+    public function tracesProtocol()
+    {
+        return $this->tracesProtocol;
+    }
+
+    public function metricsProtocol()
+    {
+        return $this->metricsProtocol;
+    }
+
+    public function logsProtocol()
+    {
+        return $this->logsProtocol;
     }
 
     public function headers()
@@ -221,6 +250,26 @@ final class ObservabilityConfig
         return $this->maxLogRecordsPerRequest;
     }
 
+    public function maxAttributesPerSpan()
+    {
+        return $this->maxAttributesPerSpan;
+    }
+
+    public function maxAttributeLength()
+    {
+        return $this->maxAttributeLength;
+    }
+
+    public function maxEventsPerSpan()
+    {
+        return $this->maxEventsPerSpan;
+    }
+
+    public function maxEventAttributes()
+    {
+        return $this->maxEventAttributes;
+    }
+
     public function hasPropagator($name)
     {
         return in_array(strtolower((string) $name), array_map('strtolower', $this->propagators), true);
@@ -246,6 +295,9 @@ final class ObservabilityConfig
             'metrics_endpoint' => $this->metricsEndpoint,
             'logs_endpoint' => $this->logsEndpoint,
             'protocol' => $this->protocol,
+            'traces_protocol' => $this->tracesProtocol,
+            'metrics_protocol' => $this->metricsProtocol,
+            'logs_protocol' => $this->logsProtocol,
             'headers' => $this->headers,
             'timeout_millis' => $this->timeoutMillis,
             'propagators' => $this->propagators,
@@ -263,9 +315,13 @@ final class ObservabilityConfig
             'max_spans_per_request' => $this->maxSpansPerRequest,
             'max_metric_points_per_request' => $this->maxMetricPointsPerRequest,
             'max_log_records_per_request' => $this->maxLogRecordsPerRequest,
+            'max_attributes_per_span' => $this->maxAttributesPerSpan,
+            'max_attribute_length' => $this->maxAttributeLength,
+            'max_events_per_span' => $this->maxEventsPerSpan,
+            'max_event_attributes' => $this->maxEventAttributes,
         );
         ksort($values);
-        $encoded = json_encode($values);
+        $encoded = json_encode($values, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
         if ($encoded === false) {
             $encoded = serialize($values);
         }

@@ -6,6 +6,8 @@ use Elven\Observability\PhpLegacy\Privacy\UrlSanitizer;
 
 final class BaggagePropagator
 {
+    const MAX_HEADER_BYTES = 8192;
+
     private $maxMembers;
 
     public function __construct($maxMembers = 32)
@@ -17,6 +19,9 @@ final class BaggagePropagator
     {
         $header = $this->header($carrier, 'baggage');
         if ($header === null || $header === '') {
+            return array();
+        }
+        if (strlen($header) > self::MAX_HEADER_BYTES) {
             return array();
         }
 
@@ -31,8 +36,9 @@ final class BaggagePropagator
             }
             $key = trim($parts[0]);
             $value = trim(explode(';', $parts[1], 2)[0]);
-            if ($this->validKey($key) && !$this->sensitiveKey($key) && strlen($value) <= 512) {
-                $baggage[$key] = UrlSanitizer::redactSensitiveText(urldecode($value));
+            $decoded = rawurldecode($value);
+            if ($this->validKey($key) && $this->allowedValue($key, $decoded) && strlen($decoded) <= 512) {
+                $baggage[$key] = UrlSanitizer::redactSensitiveText($decoded);
             }
         }
         return $baggage;
@@ -45,8 +51,13 @@ final class BaggagePropagator
             if (count($items) >= $this->maxMembers) {
                 break;
             }
-            if ($this->validKey($key) && !$this->sensitiveKey($key)) {
-                $items[] = $key . '=' . rawurlencode(UrlSanitizer::redactSensitiveText((string) $value));
+            if ($this->validKey($key) && $this->allowedValue($key, $value)) {
+                $member = $key . '=' . rawurlencode(UrlSanitizer::redactSensitiveText((string) $value));
+                $candidate = $items ? implode(',', $items) . ',' . $member : $member;
+                if (strlen($candidate) > self::MAX_HEADER_BYTES) {
+                    break;
+                }
+                $items[] = $member;
             }
         }
         if ($items) {
@@ -75,6 +86,14 @@ final class BaggagePropagator
     private function sensitiveKey($key)
     {
         return UrlSanitizer::isSensitiveKey($key)
-            || preg_match('/user|customer|account|tenant_id/i', (string) $key) === 1;
+            || preg_match('/user|customer|account|tenant[_.-]?id|organization[_.-]?id/i', (string) $key) === 1;
+    }
+
+    private function allowedValue($key, $value)
+    {
+        if (!$this->sensitiveKey($key)) {
+            return true;
+        }
+        return preg_match('/^[a-f0-9]{32}$/i', (string) $value) === 1;
     }
 }

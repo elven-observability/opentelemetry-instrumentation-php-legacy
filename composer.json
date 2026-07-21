@@ -28,8 +28,8 @@
     "ext-json": "*"
   },
   "require-dev": {
-    "guzzlehttp/guzzle": "^7.5",
-    "monolog/monolog": "^1.27",
+    "guzzlehttp/guzzle": "^6.5.8 || ^7.5",
+    "monolog/monolog": "^1.27 || ^2.9",
     "phpstan/phpstan": "^1.10",
     "phpunit/phpunit": "^9.6",
     "slim/slim": "^2.6",
@@ -39,7 +39,7 @@
     "ext-curl": "Recommended for low-overhead OTLP HTTP export and curl header injection examples.",
     "ext-soap": "Required only for SOAP/WCF instrumentation examples.",
     "guzzlehttp/guzzle": "Required only for Guzzle middleware integration.",
-    "monolog/monolog": "Required only for Monolog 1 log correlation and OTLP log handler.",
+    "monolog/monolog": "Required only for Monolog 1/2 log correlation and OTLP log handler.",
     "slim/slim": "Required only for Slim 2 examples."
   },
   "autoload": {
@@ -59,12 +59,16 @@
     "sort-packages": true
   },
   "scripts": {
-    "lint": "find src tests examples benchmarks -name '*.php' -print0 | xargs -0 -n1 php -l",
+    "lint": "find src tests examples benchmarks -path '*/vendor' -prune -o -name '*.php' -print0 | xargs -0 -n1 php -l",
     "cs": "phpcs",
     "stan": "phpstan analyse --memory-limit=512M",
     "test": "phpunit",
     "test:unit": "phpunit --testsuite unit",
     "test:integration": "phpunit --testsuite integration",
+    "test:compat:php74-legacy": [
+      "composer update --working-dir=tests/Compatibility/php74-guzzle6-monolog2 --no-interaction --prefer-dist --no-security-blocking",
+      "@php tests/Compatibility/php74-guzzle6-monolog2/verify.php"
+    ],
     "bench": "php benchmarks/run.php",
     "collector:fake": "php examples/fake-collector/server.php",
     "check": [
@@ -72,6 +76,7 @@
       "@cs",
       "@stan",
       "@test",
+      "@test:compat:php74-legacy",
       "@bench"
     ]
   },

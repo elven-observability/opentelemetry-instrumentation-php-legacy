@@ -13,45 +13,63 @@ final class Tracer
     private $redactor;
     private $rootParentContext;
     private $spanStack;
+    private $limits;
 
     public function __construct(
         SamplerInterface $sampler,
         SpanProcessor $processor,
         AttributeRedactor $redactor,
-        SpanContext $rootParentContext
+        SpanContext $rootParentContext,
+        array $limits = array()
     ) {
         $this->sampler = $sampler;
         $this->processor = $processor;
         $this->redactor = $redactor;
         $this->rootParentContext = $rootParentContext;
         $this->spanStack = array();
+        $this->limits = $limits;
     }
 
     public function startSpan($name, array $options = array())
     {
-        $parent = isset($options['parent_context']) && $options['parent_context'] instanceof SpanContext
-            ? $options['parent_context']
-            : $this->currentSpanContext();
-        if (!$parent->isValid() && !isset($options['parent_context'])) {
-            $parent = $this->rootParentContext;
-        }
-
         try {
+            $parent = isset($options['parent_context']) && $options['parent_context'] instanceof SpanContext
+                ? $options['parent_context']
+                : $this->currentSpanContext();
+            if (!$parent->isValid() && !isset($options['parent_context'])) {
+                $parent = $this->rootParentContext;
+            }
             $traceId = $parent->isValid() ? $parent->traceId() : IdGenerator::traceId();
             $spanId = IdGenerator::spanId();
+            $sampled = $this->sampler->shouldSample(
+                $traceId,
+                $parent,
+                $name,
+                isset($options['attributes']) ? $options['attributes'] : array()
+            );
+            $flags = $sampled ? '01' : '00';
+            $context = new SpanContext($traceId, $spanId, $flags, $parent->traceState(), false, true);
+            $kind = isset($options['kind']) ? $options['kind'] : Span::KIND_INTERNAL;
+            $attributes = isset($options['attributes']) && is_array($options['attributes'])
+                ? $options['attributes']
+                : array();
+
+            $span = new Span(
+                $name,
+                $context,
+                $parent,
+                $kind,
+                $sampled,
+                $this->redactor,
+                array($this, 'onSpanEnd'),
+                $this->limits
+            );
+            $span->setAttributes($attributes);
+            $this->spanStack[] = $span;
+            return $span;
         } catch (\Throwable $e) {
             return new NoopSpan();
         }
-        $sampled = $this->sampler->shouldSample($traceId, $parent, $name, isset($options['attributes']) ? $options['attributes'] : array());
-        $flags = $sampled ? '01' : '00';
-        $context = new SpanContext($traceId, $spanId, $flags, $parent->traceState(), false, true);
-        $kind = isset($options['kind']) ? $options['kind'] : Span::KIND_INTERNAL;
-        $attributes = isset($options['attributes']) && is_array($options['attributes']) ? $options['attributes'] : array();
-
-        $span = new Span($name, $context, $parent, $kind, $sampled, $this->redactor, array($this, 'onSpanEnd'));
-        $span->setAttributes($attributes);
-        $this->spanStack[] = $span;
-        return $span;
     }
 
     public function withSpan($name, callable $callback, array $options = array())
@@ -60,11 +78,17 @@ final class Tracer
         try {
             return call_user_func($callback, $span);
         } catch (\Throwable $e) {
-            $span->recordException($e);
+            try {
+                $span->recordException($e);
+            } catch (\Throwable $ignored) {
+            }
             throw $e;
         } finally {
-            if (!$span->isEnded()) {
-                $span->end();
+            try {
+                if (!$span->isEnded()) {
+                    $span->end();
+                }
+            } catch (\Throwable $ignored) {
             }
         }
     }
@@ -102,10 +126,20 @@ final class Tracer
         $this->spanStack = array();
     }
 
+    public function deactivateSpan($span)
+    {
+        if ($span instanceof Span) {
+            $this->removeFromStack($span);
+        }
+    }
+
     public function onSpanEnd(Span $span)
     {
         $this->removeFromStack($span);
-        $this->processor->onEnd($span);
+        try {
+            $this->processor->onEnd($span);
+        } catch (\Throwable $ignored) {
+        }
     }
 
     private function removeFromStack(Span $span)

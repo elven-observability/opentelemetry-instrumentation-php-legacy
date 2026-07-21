@@ -30,14 +30,43 @@ final class ConfigTest extends TestCase
         self::assertSame('checkout', $config->resourceAttributes()['team']);
     }
 
-    public function testUnsupportedProtocolDisablesTelemetrySafely(): void
+    public function testEncodedOtlpHeadersAndResourceValuesAreDecoded(): void
+    {
+        putenv('OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20test-token,X-Tenant=org%2Cregion');
+        putenv('OTEL_RESOURCE_ATTRIBUTES=team=customer%20success,region=br%2Csp');
+
+        $config = EnvConfigResolver::resolve();
+
+        self::assertSame('Bearer test-token', $config->headers()['Authorization']);
+        self::assertSame('org,region', $config->headers()['X-Tenant']);
+        self::assertSame('customer success', $config->resourceAttributes()['team']);
+        self::assertSame('br,sp', $config->resourceAttributes()['region']);
+    }
+
+    public function testUnsupportedBaseProtocolDisablesEachInheritedSignalSafely(): void
     {
         putenv('OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf');
 
         $config = EnvConfigResolver::resolve();
 
-        self::assertFalse($config->isEnabled());
-        self::assertStringContainsString('not supported', $config->disabledReason());
+        self::assertTrue($config->isEnabled());
+        self::assertSame('http/protobuf', $config->tracesProtocol());
+        self::assertSame('http/protobuf', $config->metricsProtocol());
+        self::assertSame('http/protobuf', $config->logsProtocol());
+        self::assertStringContainsString('unsupported', $config->disabledReason());
+    }
+
+    public function testSignalSpecificProtocolOverridesBaseWithoutAffectingOtherSignals(): void
+    {
+        putenv('OTEL_EXPORTER_OTLP_PROTOCOL=http/json');
+        putenv('OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf');
+
+        $config = EnvConfigResolver::resolve();
+
+        self::assertSame('http/protobuf', $config->tracesProtocol());
+        self::assertSame('http/json', $config->metricsProtocol());
+        self::assertSame('http/json', $config->logsProtocol());
+        self::assertStringContainsString('traces protocol', $config->disabledReason());
     }
 
     public function testSignalSpecificLogEndpointAndLogLimitAreResolved(): void
@@ -54,12 +83,38 @@ final class ConfigTest extends TestCase
         self::assertSame(3, $config->maxLogRecordsPerRequest());
     }
 
+    public function testResourceSafetyLimitsAreCapped(): void
+    {
+        putenv('ELVEN_OTEL_EXPORT_TIMEOUT_MS=999999');
+        putenv('ELVEN_OTEL_MAX_SPANS_PER_REQUEST=999999');
+        putenv('ELVEN_OTEL_MAX_METRIC_POINTS_PER_REQUEST=999999');
+        putenv('ELVEN_OTEL_MAX_LOG_RECORDS_PER_REQUEST=999999');
+
+        $config = EnvConfigResolver::resolve();
+
+        self::assertSame(30000, $config->timeoutMillis());
+        self::assertSame(2048, $config->maxSpansPerRequest());
+        self::assertSame(4096, $config->maxMetricPointsPerRequest());
+        self::assertSame(4096, $config->maxLogRecordsPerRequest());
+    }
+
     public function testEmptySignalSpecificEndpointsFallBackToBaseEndpoint(): void
     {
         putenv('OTEL_EXPORTER_OTLP_ENDPOINT=http://collector.local:4318');
         putenv('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=');
         putenv('OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=');
         putenv('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=');
+
+        $config = EnvConfigResolver::resolve();
+
+        self::assertSame('http://collector.local:4318/v1/traces', $config->tracesEndpoint());
+        self::assertSame('http://collector.local:4318/v1/metrics', $config->metricsEndpoint());
+        self::assertSame('http://collector.local:4318/v1/logs', $config->logsEndpoint());
+    }
+
+    public function testBaseEndpointWithWrongSignalPathIsRewrittenPerSignal(): void
+    {
+        putenv('OTEL_EXPORTER_OTLP_ENDPOINT=http://collector.local:4318/v1/traces');
 
         $config = EnvConfigResolver::resolve();
 

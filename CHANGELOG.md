@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0 - 2026-07-20
+
+- Added exit-safe `ServerRequestScope` and route-map-based `FrontControllerInstrumentation` for custom PHP 7.4 applications whose response helpers terminate through `exit`/`die`.
+- Added tested Guzzle 6/7 middleware behavior for client 4xx/5xx, synchronous failures, rejected promises, propagation, and dependency duration.
+- Expanded log processor/handler compatibility to Monolog 1 and 2, including the PHP 7.4 customer's exact Monolog 2.9.3 line.
+- Added idempotent AWS SDK v3 registration at the pre-SigV4 sign stage. The PHP 7.4 compatibility fixture proves `traceparent` is included in AWS `SignedHeaders`.
+- Added `CliInstrumentation` for bounded job spans, duration/error metrics, exact exception preservation, and optional final flush.
+- Added current stable DB semantic-convention attributes (`db.system.name`, `db.namespace`, `db.query.summary`, `db.query.text`) while retaining legacy attribute aliases for existing queries.
+- Added pseudonymous identifier hashing with optional `ELVEN_OTEL_ID_HASH_SALT`; raw identifier-like baggage is dropped while explicit 32-hex pseudonyms may propagate.
+- Added per-span attribute/event/value limits, bounded resource attributes, safe span/status names, oversized baggage/tracestate rejection, and stronger low-cardinality metric enum normalization.
+- Added signal-specific OTLP protocol resolution. Unsupported protocols never receive JSON payloads and disable only the affected signal.
+- Capped synchronous export timeout at 30 seconds, spans at 2048, metric/log points at 4096 per request, and individual attribute values at 16384 bytes; production defaults remain substantially lower.
+- Reduced request hot-path work by reading only allowlisted traffic-attribution fields instead of merging complete GET/POST arrays.
+- Added an isolated PHP 7.4 compatibility fixture for Guzzle 6.5.8, Monolog 2.9.3, and PSR Log 1.1.4. Its explicit Composer security-blocking bypass is confined to this end-of-life Guzzle compatibility proof; the package root remains audited without bypasses.
+- Expanded CI through PHP 8.5 while retaining PHP 7.3/7.4 gates, and added dedicated Guzzle 6, Monolog 1, PHP 7.4 legacy, and current secure AWS SDK compatibility jobs.
+- Rewrote the README and added a complete PHP 7.4 custom front-controller integration guide, including PHP-FPM env forwarding, SQL visibility, multi-tenant isolation, logs, AWS, jobs, rollout, and acceptance evidence.
+
+## 0.5.10 - 2026-06-25
+
+- Removed `process.pid` from resource attributes to prevent PHP-FPM worker recycling from creating unbounded Mimir time-series cardinality when resource attributes are promoted to metric labels.
+
 ## 0.5.9 - 2026-06-25
 
 Hardening only — no new signals; makes the v0.5.6/v0.5.7 additions impossible to

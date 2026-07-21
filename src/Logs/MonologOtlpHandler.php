@@ -7,7 +7,7 @@ use Monolog\Handler\AbstractProcessingHandler;
 
 final class MonologOtlpHandler extends AbstractProcessingHandler
 {
-    protected function write(array $record)
+    protected function write(array $record): void
     {
         try {
             Observability::logs()->emitMonologRecord($record);

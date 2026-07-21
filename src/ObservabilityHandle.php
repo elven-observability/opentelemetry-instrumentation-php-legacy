@@ -5,6 +5,7 @@ namespace Elven\Observability\PhpLegacy;
 use Elven\Observability\PhpLegacy\Config\ObservabilityConfig;
 use Elven\Observability\PhpLegacy\Logs\LogsFacade;
 use Elven\Observability\PhpLegacy\Metrics\MetricFacade;
+use Elven\Observability\PhpLegacy\Support\ShutdownRegistry;
 use Elven\Observability\PhpLegacy\Trace\SpanProcessor;
 
 final class ObservabilityHandle
@@ -48,6 +49,7 @@ final class ObservabilityHandle
         if ($this->shutdown) {
             return true;
         }
+        ShutdownRegistry::run();
         $this->shutdown = true;
         try {
             $this->metrics->gauge('elven.php.request.memory.peak')->set(memory_get_peak_usage(true));
@@ -55,7 +57,10 @@ final class ObservabilityHandle
         } catch (\Throwable $e) {
             return false;
         } finally {
-            $this->metrics->clearRequestAttributes();
+            try {
+                $this->metrics->clearRequestAttributes();
+            } catch (\Throwable $ignored) {
+            }
         }
     }
 

@@ -53,6 +53,7 @@ final class FakeCollectorIntegrationTest extends TestCase
             $span->setAttributes($traffic);
             Observability::metrics()->setRequestAttributes($traffic);
             $span->setAttribute('custom.safe_attribute', 'value');
+            $span->setAttribute('custom.invalid_utf8', "invalid-\xB1-value");
             Observability::logs()->emit('INFO', 'integration log', array('operation' => 'ticket_search'));
             Observability::metrics()->counter('booking.ticket.search.started')->add(1, array(
                 'operation' => 'ticket_search',
@@ -93,6 +94,27 @@ final class FakeCollectorIntegrationTest extends TestCase
             $headers = CurlInstrumentation::headersForCurl();
             self::assertMatchesRegularExpression('/^traceparent: 00-[a-f0-9]{32}-[a-f0-9]{16}-01$/', $headers[0]);
         });
+    }
+
+    public function testUnsupportedTraceProtocolDoesNotDisableMetricExport(): void
+    {
+        putenv('OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:' . $this->port);
+        putenv('OTEL_EXPORTER_OTLP_PROTOCOL=http/json');
+        putenv('OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf');
+        putenv('OTEL_LOGS_EXPORTER=none');
+        putenv('ELVEN_OTEL_EXPORT_TIMEOUT_MS=1000');
+
+        $handle = Observability::init(array('service_name' => 'signal-protocol-test'));
+        Observability::tracer()->withSpan('not-exported', function () {
+            Observability::metrics()->counter('business.operation.started')->add(1, array(
+                'operation' => 'signal_protocol_test',
+            ));
+        });
+
+        self::assertTrue($handle->forceFlush());
+        $events = $this->readEvents(1);
+        self::assertCount(1, $events);
+        self::assertSame('/v1/metrics', $events[0]['path']);
     }
 
     public function testForceFlushReportsExporterFailure(): void
@@ -142,13 +164,13 @@ final class FakeCollectorIntegrationTest extends TestCase
         self::fail('fake collector did not start');
     }
 
-    private function readEvents(): array
+    private function readEvents($minimum = 3): array
     {
         $deadline = microtime(true) + 3;
         do {
             if (file_exists($this->eventsFile)) {
                 $lines = array_values(array_filter(explode("\n", trim(file_get_contents($this->eventsFile)))));
-                if (count($lines) >= 3) {
+                if (count($lines) >= $minimum) {
                     return array_map(function ($line) {
                         return json_decode($line, true);
                     }, $lines);

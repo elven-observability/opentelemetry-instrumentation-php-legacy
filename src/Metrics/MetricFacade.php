@@ -150,7 +150,8 @@ final class MetricFacade
 
     public function recordCounter($name, $value, array $attributes = array())
     {
-        if (!$this->enabled) {
+        $value = (float) $value;
+        if (!$this->enabled || $value < 0 || is_nan($value) || is_infinite($value)) {
             return;
         }
         $name = $this->normalizeMetricName($name);
@@ -167,7 +168,8 @@ final class MetricFacade
 
     public function recordHistogram($name, $value, array $attributes = array(), $unit = 'ms')
     {
-        if (!$this->enabled) {
+        $value = (float) $value;
+        if (!$this->enabled || is_nan($value) || is_infinite($value)) {
             return;
         }
         $name = $this->normalizeMetricName($name);
@@ -200,7 +202,8 @@ final class MetricFacade
 
     public function recordGauge($name, $value, array $attributes = array())
     {
-        if (!$this->enabled) {
+        $value = (float) $value;
+        if (!$this->enabled || is_nan($value) || is_infinite($value)) {
             return;
         }
         $name = $this->normalizeMetricName($name);
@@ -261,7 +264,7 @@ final class MetricFacade
             self::$allowedLabels
         );
         ksort($attributes);
-        $encoded = json_encode($attributes);
+        $encoded = json_encode($attributes, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
         if ($encoded === false) {
             $encoded = serialize($attributes);
         }
@@ -299,6 +302,7 @@ final class MetricFacade
         $this->counterData = array();
         $this->histogramData = array();
         $this->gaugeData = array();
+        $this->startTimeUnixNano = Clock::nowUnixNano();
     }
 
     private function allowNewPoint()

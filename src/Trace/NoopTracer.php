@@ -28,4 +28,8 @@ final class NoopTracer
     {
         return SpanContext::invalid();
     }
+
+    public function deactivateSpan($span)
+    {
+    }
 }

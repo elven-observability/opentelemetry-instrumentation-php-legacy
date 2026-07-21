@@ -8,6 +8,8 @@
 /build/
 /var/
 /customer-docs/
+/tests/Compatibility/*/vendor/
+/tests/Compatibility/*/composer.lock
 /.idea/
 /.vscode/
 .DS_Store

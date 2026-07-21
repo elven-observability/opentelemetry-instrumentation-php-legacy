@@ -60,6 +60,9 @@ final class OtlpHttpJsonTraceExporter
                 'name' => $event['name'],
                 'timeUnixNano' => $event['timeUnixNano'],
                 'attributes' => OtlpAttributes::encode($event['attributes']),
+                'droppedAttributesCount' => isset($event['droppedAttributesCount'])
+                    ? (int) $event['droppedAttributesCount']
+                    : 0,
             );
         }
 
@@ -79,6 +82,8 @@ final class OtlpHttpJsonTraceExporter
             'attributes' => OtlpAttributes::encode($span->attributes()),
             'events' => $events,
             'status' => $status,
+            'droppedAttributesCount' => $span->droppedAttributesCount(),
+            'droppedEventsCount' => $span->droppedEventsCount(),
         );
         if ($parent->isValid()) {
             $encoded['parentSpanId'] = $parent->spanId();

@@ -21,4 +21,5 @@ $result = CurlInstrumentation::instrument('GET', $url, function ($span, array $h
 });
 
 Observability::shutdown();
-print_r($result);
+echo 'status=' . (int) $result['status_code'] . PHP_EOL;
+echo 'response_bytes=' . strlen((string) $result['body']) . PHP_EOL;

@@ -5,8 +5,10 @@
 1. Confirm `ELVEN_OTEL_ENABLED=true`.
 2. Confirm `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`.
 3. Confirm `OTEL_EXPORTER_OTLP_ENDPOINT` reaches the Collector from the PHP container.
-4. Temporarily set `OTEL_TRACES_EXPORTER=none` to isolate app behavior from export behavior.
-5. Use the fake collector:
+4. Prove `getenv()` through an HTTP/FPM request, not only `docker exec ... printenv` or CLI.
+5. Confirm signal-specific endpoint/protocol env vars are not overriding the base with an unsupported value.
+6. Temporarily set `OTEL_TRACES_EXPORTER=none` to isolate app behavior from export behavior.
+7. Use the fake collector:
 
 ```bash
 docker compose up fake-collector
@@ -26,6 +28,8 @@ For custom wrappers:
 $context = \Elven\Observability\PhpLegacy\Observability::logs()->correlate($context);
 ```
 
+Correlation is not automatic for arbitrary logger instances. Add the processor/facade at the shared logger factory.
+
 ## OTLP logs do not appear in Loki
 
 Confirm the app is actually exporting logs:
@@ -35,7 +39,7 @@ OTEL_LOGS_EXPORTER=otlp
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 ```
 
-For Monolog 1, correlation alone is not the exporter. Add the OTLP handler:
+For Monolog 1/2, correlation alone is not the exporter. Add the OTLP handler:
 
 ```php
 $logger->pushProcessor(new \Elven\Observability\PhpLegacy\Logs\MonologTraceProcessor());
@@ -88,11 +92,29 @@ This switch keeps span/log/header values raw. DB statements still require `ELVEN
 
 ## `http/protobuf` configured
 
-This v1 library supports `http/json`. If `http/protobuf` is configured, telemetry is disabled safely. Change:
+This release supports `http/json`. An unsupported base protocol disables inherited signal exporters; a signal-specific unsupported protocol disables only that signal. Change the relevant env:
 
 ```bash
 OTEL_EXPORTER_OTLP_PROTOCOL=http/json
 ```
+
+Also check `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`, `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL`, and `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL`.
+
+## CLI works but HTTP/FPM does not
+
+The container has env vars, but FPM likely cleared them. Add explicit `env[NAME] = $NAME` entries to the pool config in the image, rebuild, and verify through a temporary HTTP endpoint. Remove the diagnostic endpoint after proof.
+
+## Request span is missing when response helper calls `exit`
+
+Use `FrontControllerInstrumentation::beginFromGlobals()` or `HttpServerInstrumentation::begin()`. A plain callback wrapper cannot run its `finally` when legacy code terminates the request. The request scope uses the library shutdown registry and must start before dispatch.
+
+## AWS request has traceparent but propagation/signature behavior is uncertain
+
+Use `AwsInstrumentation::register($client, 'service')`, not a custom build-stage registration. The helper registers at the tested pre-SigV4 position and is idempotent. In a synthetic request, `Authorization` `SignedHeaders` should include `traceparent`.
+
+## Large latency only when Collector is unavailable
+
+Keep the Collector local and the export timeout near `200ms`. Three enabled signals flush sequentially, so large timeouts multiply request-shutdown delay before circuit breakers open. Use the kill switch during an incident.
 
 ## Composer platform failures
 

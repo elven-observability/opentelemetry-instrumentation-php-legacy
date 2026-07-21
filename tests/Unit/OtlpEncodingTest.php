@@ -10,6 +10,7 @@ use Elven\Observability\PhpLegacy\Logs\LogsFacade;
 use Elven\Observability\PhpLegacy\Metrics\MetricFacade;
 use Elven\Observability\PhpLegacy\Privacy\AttributeRedactor;
 use Elven\Observability\PhpLegacy\Resource\ResourceBuilder;
+use Elven\Observability\PhpLegacy\Support\Clock;
 use Elven\Observability\PhpLegacy\Tests\Support\Env;
 use Elven\Observability\PhpLegacy\Trace\Sampler\ParentBasedTraceIdRatioSampler;
 use Elven\Observability\PhpLegacy\Trace\SpanContext;
@@ -22,6 +23,11 @@ final class OtlpEncodingTest extends TestCase
     protected function setUp(): void
     {
         Env::reset();
+    }
+
+    public function testNanosecondClockIsAPlatformIndependentDecimalString(): void
+    {
+        self::assertMatchesRegularExpression('/^\d{19}$/', Clock::nowUnixNano());
     }
 
     public function testTracePayloadContainsResourceAndNestedSpans(): void
@@ -151,6 +157,19 @@ final class OtlpEncodingTest extends TestCase
         self::assertContains('elven.php.exporter.dropped_metric_points', $names);
     }
 
+    public function testMetricFacadeRejectsInvalidMonotonicAndNonFiniteValues(): void
+    {
+        $config = EnvConfigResolver::resolve(array('service_name' => 'legacy-test'));
+        $facade = new MetricFacade(null, new AttributeRedactor($config));
+
+        $facade->counter('invalid.counter')->add(-1);
+        $facade->counter('invalid.counter')->add(NAN);
+        $facade->histogram('invalid.histogram')->record(INF);
+        $facade->gauge('invalid.gauge')->set(-INF);
+
+        self::assertSame(array(), $facade->collect());
+    }
+
     public function testLogPayloadContainsResourceCorrelationAndRedactedBody(): void
     {
         $config = EnvConfigResolver::resolve(array(
@@ -189,7 +208,9 @@ final class OtlpEncodingTest extends TestCase
     {
         $reflection = new \ReflectionClass($logs);
         $property = $reflection->getProperty('records');
-        $property->setAccessible(true);
+        if (PHP_VERSION_ID < 80100) {
+            $property->setAccessible(true);
+        }
         $records = $property->getValue($logs);
         $property->setValue($logs, array());
         return is_array($records) ? $records : array();

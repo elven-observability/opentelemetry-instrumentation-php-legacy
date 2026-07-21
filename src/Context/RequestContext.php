@@ -4,7 +4,7 @@ namespace Elven\Observability\PhpLegacy\Context;
 
 /**
  * Request-scoped store for high-level business context that should ride along the
- * whole trace as W3C baggage (e.g. traffic_source, is_bot, tenant, search_id).
+ * whole trace as W3C baggage (e.g. traffic_source, is_bot, a hashed tenant id).
  *
  * Set once where it is known (inbound request) and it is auto-injected on every
  * outbound hop (HTTP client, SOAP, AMQP) so downstream services/spans inherit the

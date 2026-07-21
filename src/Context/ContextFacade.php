@@ -2,6 +2,8 @@
 
 namespace Elven\Observability\PhpLegacy\Context;
 
+use Elven\Observability\PhpLegacy\Privacy\IdentifierHasher;
+
 /**
  * Thin instance facade over RequestContext so callers can use the same ergonomic
  * Observability::context()->set(...) style as Observability::metrics()/tracer().
@@ -28,6 +30,19 @@ final class ContextFacade
     public function merge(array $values)
     {
         RequestContext::merge($values);
+        return $this;
+    }
+
+    /**
+     * Hash a request identifier before putting it in propagating baggage.
+     * Configure ELVEN_OTEL_ID_HASH_SALT for low-entropy identifiers.
+     */
+    public function setHashed($key, $value)
+    {
+        $hashed = IdentifierHasher::hash($value);
+        if ($hashed !== '') {
+            RequestContext::set($key, $hashed);
+        }
         return $this;
     }
 
