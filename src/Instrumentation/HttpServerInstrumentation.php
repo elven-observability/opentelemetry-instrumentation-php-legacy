@@ -123,8 +123,12 @@ final class HttpServerInstrumentation
      * @param mixed           $span       A span object, or anything (non-spans are ignored).
      * @param mixed           $statusCode HTTP status; coerced to int, falsy -> 200.
      * @param \Throwable|null $throwable  Set when the handler threw (already recorded on the span).
+     * @param string|null     $route      Stable route template — the SAME value ServerRequestScope
+     *                                    puts on the http.server.request.duration histogram, so the
+     *                                    error counter joins with it on the route label. Falsy ->
+     *                                    derived from the request path with the same normalization.
      */
-    public static function finish($span, $statusCode = null, $throwable = null)
+    public static function finish($span, $statusCode = null, $throwable = null, $route = null)
     {
         if (!is_object($span) || !method_exists($span, 'setAttribute')) {
             return;
@@ -138,12 +142,30 @@ final class HttpServerInstrumentation
         // instrument()'s finally, so it must never throw into the request path.
         try {
             $span->setAttribute('http.response.status_code', $code);
+            // Every branch carries the route so an error is attributable to a step of
+            // the funnel. Same value and same normalization as the duration histogram,
+            // so the two metrics join on the route label.
+            $route = self::normalizeRoute(
+                $route ?: UrlSanitizer::sanitizePath(
+                    isset($_SERVER['REQUEST_URI']) ? parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) : '/'
+                )
+            );
             if ($throwable !== null) {
                 // The handler threw. recordException() (in instrument) already set the
                 // span ERROR status + exception.type event; count it once here so a
                 // thrown request is never missed by the error rate, and never double
                 // counted with http_5xx below. error_category=technical (our fault).
+                //
+                // status_code closes the asymmetry with the 4xx/5xx branches. The value
+                // is the status actually resolved at close-out -- often 200, because a
+                // Slim 2 exception propagates before the response is flushed. Emitting
+                // 500 here would invent a status the instrumentation never observed and
+                // would diverge from the histogram, which records this same value. The
+                // pair (error_type=exception, status_code=200) IS the signal: a 200 that
+                // is not a success.
                 Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
+                    'route' => $route,
+                    'status_code' => (string) $statusCode,
                     'error_type' => 'exception',
                     'error_category' => 'technical',
                 ));
@@ -152,6 +174,7 @@ final class HttpServerInstrumentation
                     $span->setStatus('ERROR', 'HTTP ' . $statusCode);
                 }
                 Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
+                    'route' => $route,
                     'status_code' => (string) $statusCode,
                     'error_type' => 'http_5xx',
                     'error_category' => 'technical',
@@ -161,6 +184,7 @@ final class HttpServerInstrumentation
                 // ERROR for 4xx, but we still count it so client-error rate (401/403/
                 // 404/429...) is observable per status code. error_category=client.
                 Observability::metrics()->counter('elven.php.request.errors')->add(1, array(
+                    'route' => $route,
                     'status_code' => (string) $statusCode,
                     'error_type' => 'http_4xx',
                     'error_category' => 'client',

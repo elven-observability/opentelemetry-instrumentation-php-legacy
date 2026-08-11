@@ -119,4 +119,77 @@ final class TrafficSourceResolverTest extends TestCase
             'traffic_channel' => 'metasearch',
         ), TrafficSourceResolver::attributesFromSource('unmapped_partner', 'metabuscador'));
     }
+
+    /**
+     * A metasearch partner IS the channel. Measured in homolog-12 on 2026-08-11:
+     * the SAME skyscanner journey reported traffic_channel=metasearch on five
+     * routes and traffic_channel=paid on /rest/v2/ticket/book -- the one route
+     * whose request body carries the marketing fields. A utm_medium in the
+     * payload was outranking the intrinsic channel, moving the SALE out of the
+     * channel that produced it and breaking conversion-by-channel exactly at the
+     * step the business cares about most.
+     */
+    public function testMetasearchChannelSurvivesAMarketingMediumInThePayload(): void
+    {
+        foreach (array('cpc', 'organic', 'social', 'email') as $medium) {
+            self::assertSame(array(
+                'traffic_source' => 'skyscanner',
+                'traffic_channel' => 'metasearch',
+            ), TrafficSourceResolver::attributesFromRequest(array(
+                'traffic_source' => 'skyscanner',
+                'utm_medium' => $medium,
+            ), array()), 'utm_medium=' . $medium . ' must not outrank the intrinsic metasearch channel');
+        }
+    }
+
+    public function testMetasearchChannelSurvivesAnExplicitChannelFromQueryOrHeader(): void
+    {
+        self::assertSame(array(
+            'traffic_source' => 'kayak',
+            'traffic_channel' => 'metasearch',
+        ), TrafficSourceResolver::attributesFromRequest(array(
+            'traffic_source' => 'kayak',
+        ), array(
+            'HTTP_X_TRAFFIC_CHANNEL' => 'cpc',
+        )));
+
+        self::assertSame(array(
+            'traffic_source' => 'google_flights',
+            'traffic_channel' => 'metasearch',
+        ), TrafficSourceResolver::attributesFromRequest(array(
+            'traffic_source' => 'google_flights',
+        ), array(
+            'QUERY_STRING' => 'utm_medium=cpc',
+        )));
+    }
+
+    /**
+     * Blast-radius control for the rule above: for a NON-metasearch source the
+     * explicit medium must keep winning, exactly as before.
+     */
+    public function testNonMetasearchSourceStillHonoursTheExplicitMedium(): void
+    {
+        self::assertSame(array(
+            'traffic_source' => 'google',
+            'traffic_channel' => 'organic',
+        ), TrafficSourceResolver::attributesFromRequest(array(
+            'traffic_source' => 'google',
+            'utm_medium' => 'organic',
+        ), array()));
+
+        self::assertSame(array(
+            'traffic_source' => 'front',
+            'traffic_channel' => 'paid',
+        ), TrafficSourceResolver::attributesFromRequest(array(
+            'traffic_source' => 'front',
+            'utm_medium' => 'cpc',
+        ), array()));
+
+        self::assertSame(array(
+            'traffic_source' => 'front',
+            'traffic_channel' => 'owned',
+        ), TrafficSourceResolver::attributesFromRequest(array(
+            'traffic_source' => 'front',
+        ), array()));
+    }
 }

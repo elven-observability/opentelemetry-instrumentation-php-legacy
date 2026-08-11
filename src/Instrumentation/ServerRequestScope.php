@@ -93,10 +93,10 @@ final class ServerRequestScope
                     'status_code' => (string) $status,
                 )
             );
-            HttpServerInstrumentation::finish($this->span, $status, $throwable);
+            HttpServerInstrumentation::finish($this->span, $status, $throwable, $this->route);
         } catch (\Throwable $ignored) {
             try {
-                HttpServerInstrumentation::finish($this->span, $statusCode, $throwable);
+                HttpServerInstrumentation::finish($this->span, $statusCode, $throwable, $this->route);
             } catch (\Throwable $ignoredAgain) {
             }
         }

@@ -58,6 +58,39 @@ final class HttpErrorMappingTest extends TestCase
         return $byCat;
     }
 
+    /** Attribute sets of every elven.php.request.errors point, keyed by error_type. */
+    private function requestErrorAttributes(array $metrics): array
+    {
+        $byType = array();
+        foreach ($metrics as $metric) {
+            if ($metric['name'] !== 'elven.php.request.errors') {
+                continue;
+            }
+            foreach ($metric['points'] as $point) {
+                $type = isset($point['attributes']['error_type']) ? $point['attributes']['error_type'] : '?';
+                $byType[$type] = $point['attributes'];
+            }
+        }
+        return $byType;
+    }
+
+    /** Distinct route labels seen on a given metric. */
+    private function routeLabels(array $metrics, string $name): array
+    {
+        $routes = array();
+        foreach ($metrics as $metric) {
+            if ($metric['name'] !== $name) {
+                continue;
+            }
+            foreach ($metric['points'] as $point) {
+                if (isset($point['attributes']['route'])) {
+                    $routes[$point['attributes']['route']] = true;
+                }
+            }
+        }
+        return array_keys($routes);
+    }
+
     public function testErrorCategorySeparatesTechnicalFromClient(): void
     {
         // 4xx -> client
@@ -150,6 +183,92 @@ final class HttpErrorMappingTest extends TestCase
 
         $errors = $this->requestErrorPoints();
         self::assertSame(array('exception' => 1.0), $errors);
+    }
+
+    public function testClientErrorCarriesTheRouteAndMatchesTheDurationHistogram(): void
+    {
+        HttpServerInstrumentation::instrument('/rest/v2/aerial/search', function () {
+            return 'denied';
+        }, function () {
+            return 403;
+        });
+
+        $metrics = Observability::metrics()->collect();
+        $attrs = $this->requestErrorAttributes($metrics);
+        self::assertArrayHasKey('http_4xx', $attrs);
+        self::assertSame('/rest/v2/aerial/search', $attrs['http_4xx']['route']);
+        // The error counter must join with the duration histogram on route.
+        self::assertSame(
+            $this->routeLabels($metrics, 'http.server.request.duration'),
+            $this->routeLabels($metrics, 'elven.php.request.errors')
+        );
+    }
+
+    public function testServerErrorCarriesTheRoute(): void
+    {
+        HttpServerInstrumentation::instrument('/rest/v2/booking/reserve', function () {
+            return 'fail';
+        }, function () {
+            return 503;
+        });
+
+        $attrs = $this->requestErrorAttributes(Observability::metrics()->collect());
+        self::assertArrayHasKey('http_5xx', $attrs);
+        self::assertSame('/rest/v2/booking/reserve', $attrs['http_5xx']['route']);
+        self::assertSame('503', $attrs['http_5xx']['status_code']);
+    }
+
+    public function testThrownHandlerCarriesTheRouteAndTheResolvedStatusCode(): void
+    {
+        try {
+            HttpServerInstrumentation::instrument('/rest/v2/payment/authorize', function () {
+                throw new \RuntimeException('handler boom');
+            }, function () {
+                return 500;
+            });
+            self::fail('exception should propagate');
+        } catch (\RuntimeException $e) {
+            // expected
+        }
+
+        $attrs = $this->requestErrorAttributes(Observability::metrics()->collect());
+        self::assertArrayHasKey('exception', $attrs);
+        self::assertSame('/rest/v2/payment/authorize', $attrs['exception']['route']);
+        // The exception branch must report a status code like the 4xx/5xx branches do.
+        self::assertSame('500', $attrs['exception']['status_code']);
+    }
+
+    public function testDynamicRouteNeverLeaksIntoTheErrorLabel(): void
+    {
+        HttpServerInstrumentation::instrument(
+            '/rest/v2/customer/1234567/order/9876543',
+            function () {
+                return 'boom';
+            },
+            function () {
+                return 500;
+            }
+        );
+
+        $attrs = $this->requestErrorAttributes(Observability::metrics()->collect());
+        $route = $attrs['http_5xx']['route'];
+        self::assertSame('/rest/v2/customer/{id}/order/{id}', $route);
+        self::assertStringNotContainsString('1234567', $route);
+        self::assertStringNotContainsString('9876543', $route);
+    }
+
+    public function testFinishWithoutRouteFallsBackToTheSanitizedRequestPath(): void
+    {
+        // Query string carries a token: parse_url drops it before normalization,
+        // so it can never reach the label.
+        $_SERVER['REQUEST_URI'] = '/rest/v2/customer/1234567/profile?token=eyJhbGciOi.J9.sig';
+        $span = HttpServerInstrumentation::startFromGlobals();
+        HttpServerInstrumentation::finish($span, 500);
+
+        $attrs = $this->requestErrorAttributes(Observability::metrics()->collect());
+        self::assertSame('/rest/v2/customer/{id}/profile', $attrs['http_5xx']['route']);
+
+        unset($_SERVER['REQUEST_URI']);
     }
 
     public function testIsBotPromotedToRequestMetricsAndSpan(): void

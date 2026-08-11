@@ -165,6 +165,18 @@ final class TrafficSourceResolver
 
     private static function detectChannel(array $request, array $server, $source)
     {
+        // A metasearch partner IS the channel: 'metasearch' is intrinsic to the
+        // source and must never be overridden by a marketing medium travelling in
+        // the payload, the query string or a header. Measured in production
+        // (2026-08-11): the SAME skyscanner journey reported channel=metasearch on
+        // five routes and channel=paid on /rest/v2/ticket/book -- the one route
+        // whose body carries the marketing fields -- because utm_medium=cpc won
+        // here. That silently moves the SALE out of the channel that produced it,
+        // so conversion-by-channel is wrong exactly where it matters most.
+        if (in_array(self::normalizeSource($source), self::$metasearchSources, true)) {
+            return 'metasearch';
+        }
+
         $explicit = self::value($request, array('traffic_channel', 'trafficChannel', 'channel'));
         if ($explicit === null) {
             $explicit = self::value($request, array('utm_medium', 'utmMedium'));
