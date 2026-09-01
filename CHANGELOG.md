@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed: the metric label redactor silently rewrote a consumer's own outcome vocabulary.** `result`, `error_category` and `dependency_type` were closed enums owned by this library, and any value outside the list was replaced by `other` inside `MetricFacade::point()` — the funnel every metric of every consumer passes through. Measured in a consumer on 2026-09-01: `sum by (result)` over its checkout funnel returned exactly two values, `success` and `other`, with every business outcome (`business_reject`, `requeue`, `exhausted`, `suggested`, `variant`, `degraded`, `approved`) collapsed into the second. Nothing failed — the metric was emitted, the query ran, the panel rendered, and the value was wrong.
+- The three labels now get the same treatment `dependency_name`, `operation` and `error_type` already had: sanitized, `{id}` when the value looks like an identifier, folded to a lowercase `[a-z0-9_.-]` token, and capped at 40 characters (`AttributeRedactor::MAX_VOCABULARY_LABEL`). Cardinality is still bounded — what blows a metric up is an identifier, not a business word — and this library's own values (`hit`, `miss`, `success`, `http`, `soap`, `technical`) are unaffected.
+- The identifier defences run **before** the separator folding, and there is a regression test for that order: `sanitizePath()` is the only check that catches a bare numeric run (`/\b\d{4,}\b/`) and it needs a real word boundary, so folding `reserva 201211` into `reserva_201211` first would have quietly disarmed it. `isHighCardinalityValue()` does not cover that case.
+- Redaction markers (`{id}`, `[REDACTED_EMAIL]`) are returned byte for byte instead of being lower-cased, so one marker cannot end up with two spellings across labels.
+- `is_bot` remains a closed enum: it is genuinely ternary, so a fourth value is a defect rather than a vocabulary this library failed to anticipate.
+
 ## 0.6.1 - 2026-07-21
 
 - Made exporter circuit-breaker state survive PHP-FPM request boundaries and coordinate across workers through a small locked state file in the effective runtime user's private temporary directory.
