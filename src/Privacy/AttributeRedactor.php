@@ -9,6 +9,14 @@ final class AttributeRedactor
 {
     const REDACTED = '[REDACTED]';
 
+    /**
+     * Length cap for consumer-owned outcome labels (`result`, `error_category`,
+     * `dependency_type`). Deliberately much tighter than the general 160-char
+     * bound: an outcome vocabulary is a handful of short tokens, so anything
+     * longer is either free text or an identifier that slipped the id check.
+     */
+    const MAX_VOCABULARY_LABEL = 40;
+
     /** Per-key redaction plans. Attribute keys are a small, bounded, repeating
      *  set, so the (otherwise regex-heavy) key classification is computed once
      *  per key and memoized for the life of the process. */
@@ -178,22 +186,13 @@ final class AttributeRedactor
             if (UrlSanitizer::isHighCardinalityValue($value)) {
                 $value = '{id}';
             }
-        } elseif ($key === 'dependency_type') {
-            $value = $this->enumLabel($value, array(
-                'http', 'db', 'aws', 'cache', 'redis', 'memcached', 'mongo',
-                'soap', 'rpc', 'amqp', 'messaging', 'mail', 'smtp', 'search',
-            ));
+        } elseif (in_array($key, array('dependency_type', 'result', 'error_category'), true)) {
+            $value = $this->normalizeVocabularyLabel($value);
         } elseif ($key === 'cache_name') {
             $value = strtolower((string) preg_replace('/[^a-z0-9_.-]/i', '_', $value));
             if ($value === '' || UrlSanitizer::isHighCardinalityValue($value)) {
                 $value = 'other';
             }
-        } elseif ($key === 'result') {
-            $value = $this->enumLabel($value, array(
-                'hit', 'miss', 'error', 'success', 'failure', 'timeout', 'unknown',
-            ));
-        } elseif ($key === 'error_category') {
-            $value = $this->enumLabel($value, array('technical', 'client', 'dependency', 'timeout', 'unknown'));
         } elseif ($key === 'is_bot') {
             $value = $this->enumLabel($value, array('true', 'false', 'unknown'));
         } elseif ($key === 'traffic_source') {
@@ -202,6 +201,114 @@ final class AttributeRedactor
             $value = TrafficSourceResolver::normalizeChannel($value);
         }
         return substr($value, 0, 160);
+    }
+
+    /**
+     * Bounds an OUTCOME label without deciding what the outcome may be called.
+     *
+     * WHY THIS IS NOT AN ENUM ANY MORE.
+     *
+     * `result`, `error_category` and `dependency_type` used to be closed enums
+     * owned by this library. Anything outside the list silently became `other` --
+     * not dropped, not warned about: REPLACED, inside `MetricFacade::point()`,
+     * which every metric of every consumer goes through.
+     *
+     * The enums were written from this library's own instrumentation, where
+     * `result` really is `hit|miss|success|...`. But `result` is also the only
+     * label a consumer has for the outcome of ITS OWN business operation, and no
+     * list written here can anticipate `business_reject`, `requeue`, `exhausted`,
+     * `suggested` or `variant`. Measured in a consumer (zupper-api, 2026-09-01):
+     * `sum by (result)` over its checkout funnel returned exactly two values --
+     * `success` and `other` -- with every business outcome collapsed into the
+     * second. The dashboard looked healthy and answered nothing.
+     *
+     * 🔴 That failure mode is the worst kind: the metric is emitted, the query
+     * runs, the panel renders, and the value is wrong. Nothing anywhere fails.
+     *
+     * WHAT REPLACES IT, AND WHY CARDINALITY IS STILL BOUNDED.
+     *
+     * The same treatment `dependency_name`, `operation` and `error_type` already
+     * get -- which are equally consumer-owned and were never enums:
+     *
+     *   - normalized to a lowercase `[a-z0-9_.-]` token, so casing and spacing
+     *     cannot split one outcome into several series;
+     *   - `{id}` when it looks like an identifier, which is what actually causes a
+     *     cardinality blow-up -- an id, a UUID, a message. `business_reject` is
+     *     not a cardinality risk; `order-8F2A19C4B7E3` is, and is still caught;
+     *   - capped at {@see self::MAX_VOCABULARY_LABEL} characters, well under the
+     *     160 general bound, because an outcome token that long is a bug already;
+     *   - empty becomes `unknown`, never the empty string.
+     *
+     * `is_bot` stays a strict enum on purpose: it is genuinely ternary, and a
+     * fourth value there is a defect, not a vocabulary this library failed to
+     * anticipate.
+     *
+     * @param mixed $value
+     * @return string
+     */
+    private function normalizeVocabularyLabel($value)
+    {
+        $token = trim((string) $value);
+
+        if ($token === '') {
+            return 'unknown';
+        }
+
+        // Already a placeholder put there by `redactValue()` upstream
+        // (`[REDACTED_EMAIL]`, `[REDACTED]`, ...): return it BYTE FOR BYTE.
+        // Lower-casing it would emit `[redacted_email]` here and
+        // `[REDACTED_EMAIL]` everywhere else -- two spellings of one thing, which
+        // is a split series and a confusing panel.
+        if (self::isPlaceholder($token)) {
+            return $token;
+        }
+
+        $token = strtolower($token);
+
+        // The id defences run FIRST, and in this order, because `sanitizePath()`
+        // is the only one that catches a bare numeric run (`/\b\d{4,}\b/`) -- and
+        // it depends on word boundaries that the separator folding below would
+        // destroy: `reserva 201211` is caught, `reserva_201211` is not. Folding
+        // before sanitizing would have quietly disarmed the check.
+        // `isHighCardinalityValue()` alone does NOT cover this case; it only sees
+        // hex runs, UUIDs and long letter+digit tokens.
+        $token = UrlSanitizer::sanitizePath($token);
+        if ($this->redactionEnabled) {
+            $token = UrlSanitizer::redactSensitiveText($token);
+        }
+        if (UrlSanitizer::isHighCardinalityValue($token)) {
+            return '{id}';
+        }
+
+        // Placeholder produced by the sanitiser just above (`{id}`, `{email}`):
+        // folding it would turn `{id}` into `id`, which reads like a real outcome.
+        if (self::isPlaceholder($token)) {
+            return $token;
+        }
+
+        $token = (string) preg_replace('/[^a-z0-9_.-]+/', '_', $token);
+        $token = trim($token, '_.-');
+
+        if ($token === '') {
+            return 'unknown';
+        }
+
+        return strlen($token) > self::MAX_VOCABULARY_LABEL
+            ? substr($token, 0, self::MAX_VOCABULARY_LABEL)
+            : $token;
+    }
+
+    /**
+     * `{id}`, `{email}`, `[REDACTED]`... -- a marker, not an outcome. Recognised
+     * by shape so a new marker elsewhere in the library is covered without a
+     * parallel list here to forget to update.
+     *
+     * @param string $token
+     * @return bool
+     */
+    private static function isPlaceholder($token)
+    {
+        return preg_match('/^(?:\{[A-Za-z0-9_]+\}|\[[A-Za-z0-9_]+\])$/', $token) === 1;
     }
 
     private function enumLabel($value, array $allowed)
