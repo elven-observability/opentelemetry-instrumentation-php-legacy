@@ -227,8 +227,9 @@ final class AttributeRedactor
      *
      * WHAT REPLACES IT, AND WHY CARDINALITY IS STILL BOUNDED.
      *
-     * The same treatment `dependency_name`, `operation` and `error_type` already
-     * get -- which are equally consumer-owned and were never enums:
+     * The identifier defences `dependency_name`, `operation` and `error_type`
+     * already get -- they are equally consumer-owned and were never enums -- plus
+     * two bounds those three do not have (folding and a 40-char cap):
      *
      *   - normalized to a lowercase `[a-z0-9_.-]` token, so casing and spacing
      *     cannot split one outcome into several series;
