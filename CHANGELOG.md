@@ -1,12 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 - 2026-09-14
+
+**Upgrade note.** This release changes the *values* emitted for `result`, `error_category` and `dependency_type` when a consumer supplies its own outcome vocabulary. Values that used to be rewritten to `other` now arrive as the consumer sent them (bounded, see below). Before upgrading, review any dashboard, alert or recording rule that filters or aggregates on `result="other"`, `error_category="other"` or `dependency_type="other"`: those series will shrink and new ones will appear. This library's own values (`hit`, `miss`, `success`, `http`, `soap`, `technical`, ...) do not change. Released as a minor version so that consumers on `^0.6` are not moved to the new label semantics by a routine `composer update`; change the constraint to `^0.7` to adopt it.
 
 - **Fixed: the metric label redactor silently rewrote a consumer's own outcome vocabulary.** `result`, `error_category` and `dependency_type` were closed enums owned by this library, and any value outside the list was replaced by `other` inside `MetricFacade::point()` — the funnel every metric of every consumer passes through. Measured in a consumer on 2026-09-01: `sum by (result)` over its checkout funnel returned exactly two values, `success` and `other`, with every business outcome (`business_reject`, `requeue`, `exhausted`, `suggested`, `variant`, `degraded`, `approved`) collapsed into the second. Nothing failed — the metric was emitted, the query ran, the panel rendered, and the value was wrong.
-- The three labels now get the same treatment `dependency_name`, `operation` and `error_type` already had: sanitized, `{id}` when the value looks like an identifier, folded to a lowercase `[a-z0-9_.-]` token, and capped at 40 characters (`AttributeRedactor::MAX_VOCABULARY_LABEL`). Cardinality is still bounded — what blows a metric up is an identifier, not a business word — and this library's own values (`hit`, `miss`, `success`, `http`, `soap`, `technical`) are unaffected.
+- The three labels now go through the same identifier defences `dependency_name`, `operation` and `error_type` already had (sanitized, `{id}` when the value looks like an identifier), and are additionally folded to a lowercase `[a-z0-9_.-]` token and capped at 40 characters (`AttributeRedactor::MAX_VOCABULARY_LABEL`) — stricter than those three, which keep their casing and the general 160-character bound. Cardinality is still bounded — what blows a metric up is an identifier, not a business word — and this library's own values (`hit`, `miss`, `success`, `http`, `soap`, `technical`) are unaffected.
 - The identifier defences run **before** the separator folding, and there is a regression test for that order: `sanitizePath()` is the only check that catches a bare numeric run (`/\b\d{4,}\b/`) and it needs a real word boundary, so folding `reserva 201211` into `reserva_201211` first would have quietly disarmed it. `isHighCardinalityValue()` does not cover that case.
 - Redaction markers (`{id}`, `[REDACTED_EMAIL]`) are returned byte for byte instead of being lower-cased, so one marker cannot end up with two spellings across labels.
 - `is_bot` remains a closed enum: it is genuinely ternary, so a fourth value is a defect rather than a vocabulary this library failed to anticipate.
+
+## 0.6.2 - 2026-08-11
+
+- Added `route` to all three branches of `elven.php.request.errors`, and `status_code` to the exception branch. The route comes from `ServerRequestScope` with the same `normalizeRoute` normalisation already used by `http.server.request.duration`, so both metrics join on `route`. The exception branch reports the status actually resolved at close — frequently `200` on Slim 2, where the exception propagates before the response is flushed — rather than an invented `500`; the pair `error_type=exception`, `status_code=200` is the useful signal.
+- Made the metasearch traffic channel intrinsic: for a metasearch source, an explicit `utm_medium` in the request body no longer overrides `traffic_channel=metasearch`. Previously the one route whose body carries marketing fields (a booking) could be attributed to a different channel than the rest of the same journey. For non-metasearch sources the explicit medium still wins.
+- Unchanged and covered by tests: 4xx keeps `error_category=client` and does not mark the span as `ERROR`.
 
 ## 0.6.1 - 2026-07-21
 
