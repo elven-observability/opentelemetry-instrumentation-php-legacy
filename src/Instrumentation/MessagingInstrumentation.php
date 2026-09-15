@@ -8,12 +8,12 @@ final class MessagingInstrumentation
 {
     public static function publish($system, $destination, callable $callback, array $attributes = array())
     {
-        return self::trace('publish ' . $destination, Span::KIND_PRODUCER, $system, $destination, 'send', $callback, $attributes);
+        return self::trace('Message publish ' . $destination, Span::KIND_PRODUCER, $system, $destination, 'send', $callback, $attributes);
     }
 
     public static function consume($system, $destination, callable $callback, array $attributes = array())
     {
-        return self::trace('process ' . $destination, Span::KIND_CONSUMER, $system, $destination, 'process', $callback, $attributes);
+        return self::trace('Message consume ' . $destination, Span::KIND_CONSUMER, $system, $destination, 'process', $callback, $attributes);
     }
 
     public static function injectHeaders(array $headers = array())
