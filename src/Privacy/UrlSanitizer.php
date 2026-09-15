@@ -95,7 +95,10 @@ final class UrlSanitizer
             $value = preg_replace('/Bearer\\s+[A-Za-z0-9_\\.\\-]+/i', 'Bearer [REDACTED]', $value);
         }
         if (strpos($value, 'eyJ') !== false) {
-            $value = preg_replace('/\\beyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\b/', '[REDACTED_JWT]', $value);
+            // Not `\b`: `_` is a word character, so `token_eyJ...` has no word
+            // boundary before the JWT and went through raw. Same class of defect as
+            // the old `\b\d{4,}\b` digit check.
+            $value = preg_replace('/(?<![A-Za-z0-9])eyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+/', '[REDACTED_JWT]', $value);
         }
         if (strpos($value, '@') !== false) {
             $value = preg_replace('/[A-Z0-9._%+\\-]+@[A-Z0-9.\\-]+\\.[A-Z]{2,}/i', '[REDACTED_EMAIL]', $value);
@@ -163,7 +166,9 @@ final class UrlSanitizer
         if (preg_match('/[A-Z0-9._%+\\-]+@[A-Z0-9.\\-]+\\.[A-Z]{2,}/i', $segment) === 1) {
             return '{email}';
         }
-        if (preg_match('/\\beyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\b/', $segment) === 1) {
+        // A JWT glued to a word by `_` (`token_eyJ...`) has no word boundary before
+        // it; see redactSensitiveText().
+        if (preg_match('/(?<![A-Za-z0-9])eyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+/', $segment) === 1) {
             return '{token}';
         }
         // UUID BEFORE the CPF shape: the last group of a UUID is 12 hex characters

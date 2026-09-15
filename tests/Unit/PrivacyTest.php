@@ -323,6 +323,11 @@ final class PrivacyTest extends TestCase
             // Was `{id}` before this check (the whole-value UUID rule) and must stay
             // `{id}`: the key segment must not rename a placeholder to `{cpf}`.
             'operation: uuid after session stays an id' => array('operation', 'session_550e8400-e29b-41d4-a716-446655440000', '{id}'),
+            // `redactValue()` runs `redactSensitiveText()` on the label before
+            // `sanitizePath()`, so the JWT is replaced in place and the word stays.
+            'operation: jwt glued to the token key word' => array(
+                'operation', 'token_eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcDEF', 'token_[REDACTED_JWT]',
+            ),
         );
     }
 
@@ -351,6 +356,47 @@ final class PrivacyTest extends TestCase
         }
 
         self::assertSame('/token/{redacted}', UrlSanitizer::sanitizePath('/token/abc'));
+    }
+
+    /**
+     * A JWT glued to a word by `_` is still a JWT.
+     *
+     * Both JWT patterns started with `\b`, and `_` is a word character: in
+     * `token_eyJ...` there is no word boundary before `eyJ`, so the whole token
+     * went through `redactSensitiveText()` (span attributes, log fields, headers,
+     * baggage, metric labels) and `sanitizePath()` (`url.path`) raw.
+     *
+     * @dataProvider jwtGluedToAWordProvider
+     */
+    public function testAJwtGluedToAWordIsStillRedacted(string $where, string $value, string $expected): void
+    {
+        if ($where === 'text') {
+            $actual = UrlSanitizer::redactSensitiveText($value);
+        } elseif ($where === 'path') {
+            $actual = UrlSanitizer::sanitizePath($value);
+        } else {
+            $redactor = new AttributeRedactor(EnvConfigResolver::resolve());
+            $actual = $redactor->redactMetricLabels(array($where => $value), array($where))[$where];
+        }
+
+        self::assertSame($expected, $actual, sprintf('%s `%s`', $where, $value));
+    }
+
+    public function jwtGluedToAWordProvider(): array
+    {
+        $jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcDEF';
+
+        return array(
+            // were raw on the previous source
+            'text: glued by underscore'       => array('text', 'token_' . $jwt, 'token_[REDACTED_JWT]'),
+            'path: key segment'               => array('path', '/api/token_' . $jwt . '/x', '/api/{token}/{redacted}'),
+            'path: plain segment'             => array('path', '/api/x_' . $jwt, '/api/{token}'),
+            'operation: glued to a plain word' => array('operation', 'x_' . $jwt, 'x_[REDACTED_JWT]'),
+            // positive control: unchanged on both
+            'text: separated by a space'      => array('text', 'token ' . $jwt, 'token [REDACTED_JWT]'),
+            'text: word ending in eyJ'        => array('text', 'monkeyJar.config.v2', 'monkeyJar.config.v2'),
+            'path: word ending in eyJ'        => array('path', '/heyJude.a.b', '/heyJude.a.b'),
+        );
     }
 
     public function testUrlPathSegmentsFollowTheSameRules(): void
