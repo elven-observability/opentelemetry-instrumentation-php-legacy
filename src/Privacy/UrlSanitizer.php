@@ -104,7 +104,49 @@ final class UrlSanitizer
         $value = (string) $value;
         return preg_match('/^[0-9a-f]{16,64}$/i', $value) === 1
             || preg_match('/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i', $value) === 1
-            || preg_match('/^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z0-9_\\-]{16,}$/', $value) === 1;
+            || self::looksLikeOpaqueToken($value);
+    }
+
+    /**
+     * A long letter+digit token that is NOT made of words.
+     *
+     * The previous rule was "16+ characters of [A-Za-z0-9_-] with a letter and a
+     * digit". That also matched names that carry a small number, which are exactly
+     * the values a label exists to keep: `Missing404Exception` (the Elasticsearch
+     * client's exception for a missing index) became `{id}` in a consumer's
+     * `error_type`, erasing the only clue a failing job left. So did
+     * `allow_bearer_session_recovery_v2` in `operation`.
+     *
+     * The value still has to pass that gate, and then at least one part between
+     * `_`/`-` separators has to be opaque: 8+ characters mixing letters and digits
+     * in a way no word does. A part shaped like `letters, up to three digits,
+     * letters` (`Missing404Exception`, `Http2ProtocolError`) is word-shaped and does
+     * not decide. Runs of four or more digits are caught separately, in any
+     * position, by {@see self::sanitizePathSegment()}.
+     *
+     * Known trade-off, stated rather than hidden: a random token with a single short
+     * digit run has the same shape as a word with a number and is not caught here.
+     *
+     * @param string $value
+     * @return bool
+     */
+    private static function looksLikeOpaqueToken($value)
+    {
+        if (preg_match('/^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z0-9_\\-]{16,}$/', $value) !== 1) {
+            return false;
+        }
+
+        foreach (preg_split('/[_\\-]+/', $value) as $part) {
+            if (strlen($part) < 8 || preg_match('/[A-Za-z]/', $part) !== 1 || preg_match('/\\d/', $part) !== 1) {
+                continue;
+            }
+            if (preg_match('/^[A-Za-z]*[0-9]{1,3}[A-Za-z]*$/', $part) === 1) {
+                continue;
+            }
+            return true;
+        }
+
+        return false;
     }
 
     private static function sanitizePathSegment($segment)
@@ -122,7 +164,11 @@ final class UrlSanitizer
         if (preg_match('/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i', $segment) === 1) {
             return '{id}';
         }
-        if (preg_match('/\\b\\d{4,}\\b/', $segment) === 1) {
+        // Four or more digits in ANY position. The previous `\b\d{4,}\b` needed a
+        // word boundary, and `_` is a word character: `reserva-201211`,
+        // `reserva.201211` and `reserva 201211` became `{id}`, but `reserva_201211` --
+        // the shape a consumer builds most often -- went through as a label value.
+        if (preg_match('/[0-9]{4,}/', $segment) === 1) {
             return '{id}';
         }
         if (self::isHighCardinalityValue($segment)) {

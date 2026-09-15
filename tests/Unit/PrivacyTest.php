@@ -150,13 +150,15 @@ final class PrivacyTest extends TestCase
             'identifier collapses' => array(
                 'order-8F2A19C4B7E3D5A6', '{id}', 'an identifier must never become a series',
             ),
-            // 🔴 This one is the reason the id defences run BEFORE the separator
-            // folding. `sanitizePath()` catches a bare numeric run with
-            // `/\b\d{4,}\b/`, which needs a real word boundary -- fold the space
-            // into `_` first and `reserva_201211` sails through, because `_` is a
-            // word character. `isHighCardinalityValue()` does not cover this case.
             'bare order number collapses' => array(
                 'reserva 201211', '{id}', 'an order number must never become a series',
+            ),
+            // 🔴 0.7.0 shipped with only the case above as the control, and the
+            // numeric-run check was `/\b\d{4,}\b/`: it needs a word boundary and `_`
+            // is a word character, so the shape a consumer builds most often went
+            // through as a label value. Space, `-` and `.` were caught; this was not.
+            'order number joined by underscore collapses' => array(
+                'reserva_201211', '{id}', 'an order number must never become a series, whatever joins it',
             ),
             'uuid collapses' => array(
                 '3f2504e0-4f89-41d3-9a0c-0305e82c3301', '{id}', 'a uuid must never become a series',
@@ -178,6 +180,80 @@ final class PrivacyTest extends TestCase
                 'this_is_not_an_outcome_it_is_a_whole_sen',
                 'an outcome token that long is free text',
             ),
+        );
+    }
+
+    /**
+     * A NAME that carries a small number is not an identifier.
+     *
+     * Before 0.7.1 any 16+ character letter+digit token became `{id}` -- including
+     * `Missing404Exception`, which is what a consumer's failing job reported as
+     * `error_type`, so the only clue it left was erased. This is not a 0.7.0
+     * regression: `error_type`, `operation` and `dependency_name` went through the
+     * same check before.
+     *
+     * @dataProvider namesWithNumbersProvider
+     */
+    public function testNamesWithASmallNumberAreNotMistakenForIdentifiers(string $key, string $value): void
+    {
+        $redactor = new AttributeRedactor(EnvConfigResolver::resolve());
+
+        self::assertSame(
+            $value,
+            $redactor->redactMetricLabels(array($key => $value), array($key))[$key],
+            sprintf('`%s=%s` is a name, not an identifier', $key, $value)
+        );
+    }
+
+    public function namesWithNumbersProvider(): array
+    {
+        return array(
+            'error_type: elasticsearch missing index' => array('error_type', 'Missing404Exception'),
+            'error_type: elasticsearch bad request'   => array('error_type', 'BadRequest400Exception'),
+            'error_type: http2 protocol'              => array('error_type', 'Http2ProtocolError'),
+            'operation: versioned flag name'          => array('operation', 'allow_bearer_session_recovery_v2'),
+            'dependency_name: collation-like name'    => array('dependency_name', 'utf8mb4_unicode_ci_collation'),
+            'result: experiment arm'                  => array('result', 'checkout_revamp_v2_treatment'),
+        );
+    }
+
+    /**
+     * The negative control for the test above: relaxing the rule for names must not
+     * let an opaque token through, on any of the labels it applies to.
+     *
+     * @dataProvider opaqueTokensProvider
+     */
+    public function testOpaqueTokensStillCollapse(string $key, string $value): void
+    {
+        $redactor = new AttributeRedactor(EnvConfigResolver::resolve());
+
+        self::assertSame(
+            '{id}',
+            $redactor->redactMetricLabels(array($key => $value), array($key))[$key],
+            sprintf('`%s=%s` must never become a series', $key, $value)
+        );
+    }
+
+    public function opaqueTokensProvider(): array
+    {
+        return array(
+            'operation: order code'             => array('operation', 'order_8F2A19C4B7E3'),
+            'operation: base62 token'           => array('operation', 'aZ3kP9qL2mX7vB1n'),
+            'error_type: uuid'                  => array('error_type', '3f2504e0-4f89-41d3-9a0c-0305e82c3301'),
+            'dependency_name: hex run'          => array('dependency_name', '9f86d081884c7d65'),
+            'dependency_name: number by _'      => array('dependency_name', 'shard_20260910'),
+            'error_type: number glued to word'  => array('error_type', 'retry4821'),
+        );
+    }
+
+    public function testUrlPathSegmentsFollowTheSameRules(): void
+    {
+        self::assertSame('/order/{id}', UrlSanitizer::sanitizePath('/order/reserva_201211'));
+        self::assertSame('/order/{id}', UrlSanitizer::sanitizePath('/order/reserva-201211'));
+        self::assertSame(
+            '/rest/v2/payment/PaymentPaymeeNotifications2',
+            UrlSanitizer::sanitizePath('/rest/v2/payment/PaymentPaymeeNotifications2'),
+            'a route name with a digit is a name'
         );
     }
 

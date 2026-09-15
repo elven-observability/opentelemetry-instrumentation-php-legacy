@@ -266,13 +266,12 @@ final class AttributeRedactor
 
         $token = strtolower($token);
 
-        // The id defences run FIRST, and in this order, because `sanitizePath()`
-        // is the only one that catches a bare numeric run (`/\b\d{4,}\b/`) -- and
-        // it depends on word boundaries that the separator folding below would
-        // destroy: `reserva 201211` is caught, `reserva_201211` is not. Folding
-        // before sanitizing would have quietly disarmed the check.
-        // `isHighCardinalityValue()` alone does NOT cover this case; it only sees
-        // hex runs, UUIDs and long letter+digit tokens.
+        // The id defences run FIRST, before the separator folding below: every
+        // check must see the value the consumer sent. `sanitizePath()` catches a
+        // run of four or more digits in any position (since 0.7.1; before that it
+        // needed a word boundary and `reserva_201211` went through), and
+        // `isHighCardinalityValue()` sees hex runs, UUIDs and opaque letter+digit
+        // tokens.
         $token = UrlSanitizer::sanitizePath($token);
         if ($this->redactionEnabled) {
             $token = UrlSanitizer::redactSensitiveText($token);
