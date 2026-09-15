@@ -195,6 +195,19 @@ final class Observability
         try {
             ShutdownRegistry::run();
             if (self::$handle instanceof ObservabilityHandle) {
+                // After ShutdownRegistry::run(), which finalizes the request scope
+                // (the SERVER span and its HTTP attributes), and before the flush:
+                // whatever is still open here belongs to a process that died in the
+                // middle of the work. Ending it keeps the parent of the children
+                // that are about to be exported; clearActiveSpans() alone would drop it.
+                // The order is pinned by
+                // LocalRootSurvivalTest::testServerScopeIsFinalizedBeforeOpenSpansAreEnded.
+                if (is_object(self::$tracer) && method_exists(self::$tracer, 'endActiveSpans')) {
+                    try {
+                        self::$tracer->endActiveSpans('process_shutdown');
+                    } catch (\Throwable $ignored) {
+                    }
+                }
                 $ok = self::$handle->shutdown();
                 if (is_object(self::$tracer) && method_exists(self::$tracer, 'clearActiveSpans')) {
                     self::$tracer->clearActiveSpans();
