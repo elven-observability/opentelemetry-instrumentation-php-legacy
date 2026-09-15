@@ -399,6 +399,78 @@ final class PrivacyTest extends TestCase
         );
     }
 
+    /**
+     * An identifier after a DOT is still an identifier.
+     *
+     * The letter+digit rule only accepted `[A-Za-z0-9_-]` in the whole value and
+     * the hex rule was anchored to the whole value, so an id after a dotted prefix
+     * -- `'checkout.' . $token` -- was never checked: `checkout.8f2a19c4b7e3a1b2c3d4`
+     * went through while `checkout_8F2A19C4B7E3A1B2` became `{id}`. Same class of
+     * defect as the `_` in the four-digit check.
+     *
+     * The data sets exercise the two rules separately: `checkout.a1b2c3d4e5f6` is
+     * only caught by the letter+digit rule (12 characters, too short for the hex
+     * rule) and `checkout.deadbeefcafebabe` only by the hex rule (no digit).
+     *
+     * @dataProvider identifiersAfterADotProvider
+     */
+    public function testAnIdentifierAfterADotStillCollapses(string $key, string $value, string $expected): void
+    {
+        $redactor = new AttributeRedactor(EnvConfigResolver::resolve());
+
+        self::assertSame(
+            $expected,
+            $redactor->redactMetricLabels(array($key => $value), array($key))[$key],
+            sprintf('`%s=%s` carries an identifier and must never become a series', $key, $value)
+        );
+    }
+
+    public function identifiersAfterADotProvider(): array
+    {
+        return array(
+            'operation: hex id after a dot'          => array('operation', 'checkout.8f2a19c4b7e3a1b2c3d4', '{id}'),
+            'operation: upper-case hex after a dot'  => array('operation', 'checkout.8F2A19C4B7E3A1B2', '{id}'),
+            'operation: letter+digit rule only'      => array('operation', 'checkout.a1b2c3d4e5f6', '{id}'),
+            'operation: hex rule only (no digit)'    => array('operation', 'checkout.deadbeefcafebabe', '{id}'),
+            'error_type: id after a dot'             => array('error_type', 'Payment.8f2a19c4b7e3a1b2c3d4', '{id}'),
+            'result: id after a dot'                 => array('result', 'checkout.8f2a19c4b7e3a1b2c3d4', '{id}'),
+            'route: segment with an id after a dot'  => array('route', '/order.8f2a19c4b7e3a1b2c3d4/items', '/{id}/items'),
+            'cache_name: id after a dot'             => array('cache_name', 'rates.8f2a19c4b7e3a1b2c3d4', 'other'),
+        );
+    }
+
+    /**
+     * Positive control for the test above: splitting on `.` must not erase a dotted
+     * NAME. The last four go through the letter+digit gate (16+ characters with a
+     * digit), so they are checked part by part and must survive that.
+     *
+     * @dataProvider dottedNamesProvider
+     */
+    public function testDottedNamesAreNotMistakenForIdentifiers(string $key, string $value): void
+    {
+        $redactor = new AttributeRedactor(EnvConfigResolver::resolve());
+
+        self::assertSame(
+            $value,
+            $redactor->redactMetricLabels(array($key => $value), array($key))[$key],
+            sprintf('`%s=%s` is a name, not an identifier', $key, $value)
+        );
+    }
+
+    public function dottedNamesProvider(): array
+    {
+        return array(
+            'operation: key word as the last word'  => array('operation', 'reservation.persist.email'),
+            'operation: flag name'                  => array('operation', 'feature_flag.credit_card_payment'),
+            'operation: short dotted name'          => array('operation', 'dsg.search.g3'),
+            'operation: installments count'         => array('operation', 'funnel.payment.aerial.installments.1x'),
+            'operation: dsg operation per airline'  => array('operation', 'dsg.reservaraereocomviagenstarifadas.g3'),
+            'dependency_name: cluster service host' => array('dependency_name', 'msinsurance-service.app-2.svc.cluster.local'),
+            'error_type: dotted exception name'     => array('error_type', 'System.Security.Cryptography.X509Certificates.CryptographicException'),
+            'route: versioned asset name'           => array('route', '/static/jquery-3.6.0.min.js'),
+        );
+    }
+
     public function testUrlPathSegmentsFollowTheSameRules(): void
     {
         self::assertSame('/order/{id}', UrlSanitizer::sanitizePath('/order/reserva_201211'));
