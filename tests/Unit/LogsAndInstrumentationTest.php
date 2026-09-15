@@ -6,6 +6,7 @@ use Elven\Observability\PhpLegacy\Instrumentation\CurlInstrumentation;
 use Elven\Observability\PhpLegacy\Instrumentation\DbInstrumentation;
 use Elven\Observability\PhpLegacy\Instrumentation\HeaderInjector;
 use Elven\Observability\PhpLegacy\Instrumentation\HttpClientInstrumentation;
+use Elven\Observability\PhpLegacy\Instrumentation\AmqpInstrumentation;
 use Elven\Observability\PhpLegacy\Instrumentation\Slim2Instrumentation;
 use Elven\Observability\PhpLegacy\Logs\MonologOtlpHandler;
 use Elven\Observability\PhpLegacy\Logs\MonologTraceProcessor;
@@ -217,6 +218,26 @@ final class LogsAndInstrumentationTest extends TestCase
     public function testSlim2StableRoute(): void
     {
         self::assertSame('/rest/v14/ticket/search', Slim2Instrumentation::restRoute('14', 'Ticket', 'Search'));
+    }
+
+    /**
+     * Span names are aggregation keys (Tempo search, spanmetrics `span_name`).
+     * 0.5.x shipped `Message publish <destination>` / `Message consume <destination>`
+     * and 0.6.0 silently renamed them to `publish`/`process`, splitting every
+     * series of consumers that upgraded. Pin the published convention.
+     */
+    public function testMessagingSpanNamesKeepMessageOperationDestinationConvention(): void
+    {
+        $seen = array();
+        AmqpInstrumentation::publish('orders', function ($span) use (&$seen) {
+            $seen['publish'] = array($span->name(), $span->kind());
+        });
+        AmqpInstrumentation::consume('orders', function ($span) use (&$seen) {
+            $seen['consume'] = array($span->name(), $span->kind());
+        });
+
+        self::assertSame(array('Message publish orders', 'PRODUCER'), $seen['publish']);
+        self::assertSame(array('Message consume orders', 'CONSUMER'), $seen['consume']);
     }
 
     public function testDbInstrumentationRedactsStatementAndReturnsCallbackResult(): void
