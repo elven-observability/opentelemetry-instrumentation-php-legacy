@@ -12,10 +12,36 @@ use Elven\Observability\PhpLegacy\Trace\Span;
  */
 final class GuzzleInstrumentation
 {
-    public static function middleware()
+    /**
+     * @param array $config Optional, all keys may be omitted:
+     *   - `dependency_name` (string): value of the span's `dependency_name` attribute, for
+     *     consumers that keep their own closed dependency vocabulary. Without it the
+     *     attribute is the host. The span name, `server.address` and the
+     *     `elven.php.dependency.duration` label keep the host, exactly as
+     *     HttpClientInstrumentation::instrument() does with its `$attributes`, so no
+     *     existing metric series changes identity.
+     *   - `mark_client_errors` (bool, default true): a 4xx response marks the CLIENT span
+     *     ERROR with `error.type=<status>`, as HTTP semconv recommends for CLIENT spans.
+     *     `false` leaves a 4xx span UNSET and without `error.type` (the status code is
+     *     still recorded), for consumers whose contract treats a 4xx as a legitimate
+     *     answer of the dependency (404 "not found" is not an incident). A 5xx, a
+     *     transport failure and any rejection without a 4xx response are still ERROR.
+     *     Values read from config or environment count as `false` when
+     *     FILTER_VALIDATE_BOOLEAN reads them as false: `0`, `'0'`, `'false'`, `'no'`,
+     *     `'off'` (any case, surrounding spaces ignored). `null`, a blank string and
+     *     anything unrecognised keep the default.
+     */
+    public static function middleware(array $config = array())
     {
-        return function (callable $handler) {
-            return function ($request, array $options) use ($handler) {
+        $dependencyName = isset($config['dependency_name'])
+            && is_string($config['dependency_name'])
+            && trim($config['dependency_name']) !== ''
+            ? trim($config['dependency_name'])
+            : null;
+        $markClientErrors = self::marksClientErrors($config);
+
+        return function (callable $handler) use ($dependencyName, $markClientErrors) {
+            return function ($request, array $options) use ($handler, $dependencyName, $markClientErrors) {
                 if (!Observability::isEnabled()) {
                     return $handler($request, $options);
                 }
@@ -29,7 +55,7 @@ final class GuzzleInstrumentation
                 $host = isset($parts['host']) ? strtolower((string) $parts['host']) : 'http';
                 $path = isset($parts['path']) ? (string) $parts['path'] : '/';
                 $start = microtime(true);
-                $span = self::startSpan($method, $host, $path, $parts);
+                $span = self::startSpan($method, $host, $path, $parts, $dependencyName);
 
                 try {
                     $headers = HeaderInjector::injectContext(array(), $span->context());
@@ -44,7 +70,7 @@ final class GuzzleInstrumentation
                 try {
                     $promise = $handler($request, $options);
                 } catch (\Throwable $e) {
-                    self::recordFailure($span, $e);
+                    self::recordFailure($span, $e, $markClientErrors);
                     self::finish($span, $host, $start);
                     throw $e;
                 }
@@ -57,12 +83,12 @@ final class GuzzleInstrumentation
                 self::deactivate($span);
                 try {
                     return $promise->then(
-                        function ($response) use ($span, $host, $start) {
+                        function ($response) use ($span, $host, $start, $markClientErrors) {
                             try {
                                 if (is_object($response) && method_exists($response, 'getStatusCode')) {
                                     $status = (int) $response->getStatusCode();
                                     $span->setAttribute('http.response.status_code', $status);
-                                    if ($status >= 400) {
+                                    if ($status >= 500 || ($status >= 400 && $markClientErrors)) {
                                         $span->setStatus('ERROR', 'HTTP ' . $status);
                                         $span->setAttribute('error.type', (string) $status);
                                     }
@@ -72,14 +98,14 @@ final class GuzzleInstrumentation
                             self::finish($span, $host, $start);
                             return $response;
                         },
-                        function ($reason) use ($span, $host, $start) {
-                            self::recordFailure($span, $reason);
+                        function ($reason) use ($span, $host, $start, $markClientErrors) {
+                            self::recordFailure($span, $reason, $markClientErrors);
                             self::finish($span, $host, $start);
                             return self::rejectedPromise($reason);
                         }
                     );
                 } catch (\Throwable $e) {
-                    self::recordFailure($span, $e);
+                    self::recordFailure($span, $e, $markClientErrors);
                     self::finish($span, $host, $start);
                     throw $e;
                 }
@@ -87,7 +113,30 @@ final class GuzzleInstrumentation
         };
     }
 
-    private static function startSpan($method, $host, $path, array $parts)
+    /**
+     * `mark_client_errors` is off only for a value FILTER_VALIDATE_BOOLEAN reads as false.
+     * FILTER_VALIDATE_BOOLEAN also reads `null` (a key filled with `?? null`) and a blank
+     * string (an empty environment variable) as false; both keep the default here, so a
+     * missing value does not silence 4xx errors. `getenv()` of an unset variable returns the
+     * boolean `false`, which is indistinguishable from an explicit `false` and turns the
+     * marking off.
+     *
+     * @return bool
+     */
+    private static function marksClientErrors(array $config)
+    {
+        if (!array_key_exists('mark_client_errors', $config)) {
+            return true;
+        }
+        $value = $config['mark_client_errors'];
+        if (!is_scalar($value) || (is_string($value) && trim($value) === '')) {
+            return true;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) !== false;
+    }
+
+    private static function startSpan($method, $host, $path, array $parts, $dependencyName = null)
     {
         try {
             return Observability::tracer()->startSpan('HTTP ' . $method . ' ' . $host, array(
@@ -98,7 +147,7 @@ final class GuzzleInstrumentation
                     'server.port' => isset($parts['port']) ? (int) $parts['port'] : 0,
                     'url.path' => UrlSanitizer::sanitizePath($path),
                     'dependency_type' => 'http',
-                    'dependency_name' => $host,
+                    'dependency_name' => $dependencyName !== null ? $dependencyName : $host,
                 ),
             ));
         } catch (\Throwable $ignored) {
@@ -106,9 +155,20 @@ final class GuzzleInstrumentation
         }
     }
 
-    private static function recordFailure($span, $reason)
+    private static function recordFailure($span, $reason, $markClientErrors = true)
     {
         try {
+            if (!$markClientErrors) {
+                // With `http_errors` on (or the middleware pushed outside Guzzle's
+                // http_errors), a 4xx arrives as a rejection that still carries the
+                // response. Same policy as the fulfilled branch: status recorded, span
+                // left UNSET. The rejection itself is untouched by this method.
+                $status = self::rejectionStatus($reason);
+                if ($status >= 400 && $status < 500) {
+                    $span->setAttribute('http.response.status_code', $status);
+                    return;
+                }
+            }
             if ($reason instanceof \Throwable) {
                 $span->recordException($reason);
                 $span->setAttribute('error.type', get_class($reason));
@@ -124,6 +184,27 @@ final class GuzzleInstrumentation
             }
         } catch (\Throwable $ignored) {
         }
+    }
+
+    /**
+     * HTTP status of the response carried by a rejection (Guzzle RequestException), or 0.
+     *
+     * @param mixed $reason
+     * @return int
+     */
+    private static function rejectionStatus($reason)
+    {
+        try {
+            if (is_object($reason) && method_exists($reason, 'getResponse')) {
+                $response = $reason->getResponse();
+                if (is_object($response) && method_exists($response, 'getStatusCode')) {
+                    return (int) $response->getStatusCode();
+                }
+            }
+        } catch (\Throwable $ignored) {
+        }
+
+        return 0;
     }
 
     /**

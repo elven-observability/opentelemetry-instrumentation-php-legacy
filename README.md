@@ -255,6 +255,17 @@ $stack->push(GuzzleInstrumentation::middleware(), 'elven.otel');
 $client = new Client(array('handler' => $stack));
 ```
 
+Two optional settings; without them the middleware behaves as before (`dependency_name` = host, `mark_client_errors` = `true`):
+
+```php
+$stack->push(GuzzleInstrumentation::middleware(array(
+    'dependency_name' => 'payments-gateway', // span attribute; default is the host
+    'mark_client_errors' => false,           // a 4xx leaves the CLIENT span UNSET
+)), 'elven.otel');
+```
+
+`dependency_name` only changes the span attribute: the span name, `server.address` and the `elven.php.dependency.duration` label keep the host. By default a 4xx response marks the CLIENT span `ERROR` with `error.type=<status>`, as HTTP semantic conventions recommend for CLIENT spans; with `mark_client_errors => false` a 4xx records `http.response.status_code` and leaves the status `UNSET` without `error.type`. A 5xx and a transport failure are `ERROR` either way. Besides the boolean `false`, the values `0`, `'0'`, `'false'`, `'no'` and `'off'` (any case) also turn the marking off, so a setting read from the environment works as written; `null`, a blank string and any other value keep the default. `getenv()` returns the boolean `false` for an unset variable, which turns the marking off.
+
 For applications that instantiate `new Client()` directly in many classes, consolidate construction into one factory. Calls made by uninstrumented client instances cannot be observed without PECL.
 
 For cURL/custom HTTP wrappers, use `CurlInstrumentation` or `HttpClientInstrumentation`. Never attach request/response bodies.
