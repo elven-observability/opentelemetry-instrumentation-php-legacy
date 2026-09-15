@@ -113,7 +113,11 @@ final class UrlSanitizer
     public static function isHighCardinalityValue($value)
     {
         $value = (string) $value;
-        return preg_match('/^[0-9a-f]{16,64}$/i', $value) === 1
+        // A hex run of 16-64 characters as a whole PART between `.`, `_` or `-`, not
+        // only as the whole value. `checkout.deadbeefcafebabe` is an id after a
+        // prefix; with no digit in it, neither the four-digit check nor the
+        // letter+digit rule below sees it.
+        return preg_match('/(?<![^._\\-])[0-9a-f]{16,64}(?![^._\\-])/i', $value) === 1
             || preg_match('/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i', $value) === 1
             || self::looksLikeOpaqueToken($value);
     }
@@ -129,25 +133,35 @@ final class UrlSanitizer
      * `allow_bearer_session_recovery_v2` in `operation`.
      *
      * The value still has to pass that gate, and then at least one part between
-     * `_`/`-` separators has to be opaque: 8+ characters mixing letters and digits
-     * in a way no word does. A part shaped like `letters, up to three digits,
+     * `_`/`-`/`.` separators has to be opaque: 8+ characters mixing letters and
+     * digits in a way no word does. A part shaped like `letters, up to three digits,
      * letters` (`Missing404Exception`, `Http2ProtocolError`) is word-shaped and does
      * not decide. Runs of four or more digits are caught separately, in any
      * position, by {@see self::sanitizePathSegment()}.
      *
-     * Known trade-off, stated rather than hidden: a random token with a single short
-     * digit run has the same shape as a word with a number and is not caught here.
+     * `.` is a separator like `_` and `-`. Before, the gate did not accept a `.`
+     * at all, so an id after a dotted prefix -- the shape a consumer builds with
+     * `'checkout.' . $token` -- was never checked: `checkout.8f2a19c4b7e3a1b2c3d4`
+     * went through while `checkout_8F2A19C4B7E3A1B2` became `{id}`. Dotted names
+     * (`funnel.payment.aerial.installments.1x`, `dsg.search.g3`) are split into
+     * words and keep going through.
+     *
+     * Known trade-offs, stated rather than hidden: a random token with a single
+     * short digit run has the same shape as a word with a number and is not caught
+     * here. And a dotted name with a generated label now collapses exactly as it
+     * already did with `_`: a host such as `db1.c9akciq32xyz.us-east-1.rds.amazonaws.com`
+     * in `dependency_name` becomes `{id}`.
      *
      * @param string $value
      * @return bool
      */
     private static function looksLikeOpaqueToken($value)
     {
-        if (preg_match('/^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z0-9_\\-]{16,}$/', $value) !== 1) {
+        if (preg_match('/^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z0-9_.\\-]{16,}$/', $value) !== 1) {
             return false;
         }
 
-        foreach (preg_split('/[_\\-]+/', $value) as $part) {
+        foreach (preg_split('/[_.\\-]+/', $value) as $part) {
             if (strlen($part) < 8 || preg_match('/[A-Za-z]/', $part) !== 1 || preg_match('/\\d/', $part) !== 1) {
                 continue;
             }
