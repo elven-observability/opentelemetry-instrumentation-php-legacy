@@ -246,6 +246,44 @@ final class PrivacyTest extends TestCase
         );
     }
 
+    /**
+     * The placeholder names what was found, and a CPF is only a CPF when it stands
+     * alone.
+     *
+     * `sanitizePathSegment()` tested the CPF shape, unanchored, BEFORE the UUID: the
+     * last UUID group `446655440000` holds eleven digits in a row, so a UUID was
+     * reported as `{cpf}`, and so was any longer digit run (a card number). Every
+     * one of these was redacted before and still is -- only the name of the
+     * placeholder changes, and a segment is never let through raw.
+     *
+     * @dataProvider segmentPlaceholderProvider
+     */
+    public function testSegmentPlaceholderNamesWhatWasFound(string $key, string $value, string $expected): void
+    {
+        $redactor = new AttributeRedactor(EnvConfigResolver::resolve());
+
+        self::assertSame(
+            $expected,
+            $redactor->redactMetricLabels(array($key => $value), array($key))[$key],
+            sprintf('`%s=%s` must be redacted as %s', $key, $value, $expected)
+        );
+    }
+
+    public function segmentPlaceholderProvider(): array
+    {
+        return array(
+            // were `{cpf}` on 5de2a5e
+            'operation: uuid is not a cpf'            => array('operation', 'order_550e8400-e29b-41d4-a716-446655440000', '{id}'),
+            'operation: card-length run is not a cpf' => array('operation', 'pedido_4111111111111111', '{id}'),
+            'operation: cpf shape inside more digits' => array('operation', 'doc_123.456.789-100', '{id}'),
+            'route: uuid segment is not a cpf'        => array('route', '/order/550e8400-e29b-41d4-a716-446655440000/items', '/order/{id}/items'),
+            // positive control: a CPF standing alone is still named `{cpf}`
+            'operation: bare cpf digits'              => array('operation', 'doc_12345678901', '{cpf}'),
+            'operation: formatted cpf'                => array('operation', 'doc_123.456.789-10', '{cpf}'),
+            'route: cpf glued to a word'              => array('route', '/customer/doc_12345678901/orders', '/customer/{cpf}/orders'),
+        );
+    }
+
     public function testUrlPathSegmentsFollowTheSameRules(): void
     {
         self::assertSame('/order/{id}', UrlSanitizer::sanitizePath('/order/reserva_201211'));

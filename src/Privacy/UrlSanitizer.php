@@ -158,11 +158,21 @@ final class UrlSanitizer
         if (preg_match('/\\beyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\b/', $segment) === 1) {
             return '{token}';
         }
-        if (preg_match('/[0-9]{3}\\.?[0-9]{3}\\.?[0-9]{3}-?[0-9]{2}/', $segment) === 1) {
-            return '{cpf}';
-        }
+        // UUID BEFORE the CPF shape: the last group of a UUID is 12 hex characters
+        // and, when they are all digits (`446655440000`), the CPF shape matched
+        // inside it and `order_550e8400-e29b-41d4-a716-446655440000` was reported
+        // as `{cpf}`.
         if (preg_match('/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i', $segment) === 1) {
             return '{id}';
+        }
+        // The CPF shape still decides that the segment is redacted, exactly as
+        // before. It is NAMED `{cpf}` only when it stands alone between non-digits;
+        // inside a longer digit run (a 16-digit card number, `123.456.789-100`) it
+        // is some other identifier and becomes `{id}` -- never the raw value.
+        if (preg_match('/[0-9]{3}\\.?[0-9]{3}\\.?[0-9]{3}-?[0-9]{2}/', $segment) === 1) {
+            return preg_match('/(?<![0-9])[0-9]{3}\\.?[0-9]{3}\\.?[0-9]{3}-?[0-9]{2}(?![0-9])/', $segment) === 1
+                ? '{cpf}'
+                : '{id}';
         }
         // Four or more digits in ANY position. The previous `\b\d{4,}\b` needed a
         // word boundary, and `_` is a word character: `reserva-201211`,
