@@ -4,7 +4,9 @@ namespace Elven\Observability\PhpLegacy\Tests\Unit;
 
 use Elven\Observability\PhpLegacy\Config\EnvConfigResolver;
 use Elven\Observability\PhpLegacy\Export\OtlpHttpJsonTraceExporter;
+use Elven\Observability\PhpLegacy\Instrumentation\HttpServerInstrumentation;
 use Elven\Observability\PhpLegacy\Metrics\MetricFacade;
+use Elven\Observability\PhpLegacy\Observability;
 use Elven\Observability\PhpLegacy\Privacy\AttributeRedactor;
 use Elven\Observability\PhpLegacy\Resource\ResourceBuilder;
 use Elven\Observability\PhpLegacy\Tests\Support\Env;
@@ -18,12 +20,15 @@ use PHPUnit\Framework\TestCase;
 /**
  * A parent span ends AFTER its children: every child ends inside the callback
  * that the parent wraps, so the local root (parent invalid or remote) is the LAST
- * span of its unit of work to end. The per-request span budget used to throw
- * parents away while their children were exported: children fill the buffer and
- * the parents that end after them are dropped (the local root, and an
- * intermediate parent such as the INTERNAL span that wraps the DB writes inside a
- * CONSUMER). Every exported child then points at a parentSpanId that does not
- * exist in the trace (orphans in Tempo).
+ * span of its unit of work to end. Two paths used to throw parents away while
+ * their children were exported, which leaves every child pointing at a
+ * parentSpanId that does not exist in the trace (orphans in Tempo):
+ *
+ *  - the per-request span budget: children fill the buffer, the parents that end
+ *    after them are dropped (the local root, and an intermediate parent such as
+ *    the INTERNAL span that wraps the DB writes inside a CONSUMER);
+ *  - process death (fatal or exit) in the middle of the unit of work: the root is
+ *    still open, shutdown() flushes the children and clears the stack.
  *
  * With the reserve the buffer can hold max_spans + PARENT_RESERVE, so the export
  * retry must keep capacity(): slicing it back to max_spans cuts the reserved
@@ -304,6 +309,128 @@ final class LocalRootSurvivalTest extends TestCase
         self::assertCount(3 * 3, $client->spansById());
     }
 
+    public function testSpanLeftOpenAtShutdownIsEndedAndExported(): void
+    {
+        Observability::init(array(
+            'service_name' => 'local-root-shutdown-test',
+            'metrics_exporter' => 'none',
+            'logs_exporter' => 'none',
+        ));
+        $client = self::recordingClient();
+        self::replaceTraceClient($client);
+        error_clear_last();
+
+        $tracer = Observability::tracer();
+        $root = $tracer->startSpan('Message consume queue', array(
+            'kind' => Span::KIND_CONSUMER,
+            'parent_context' => self::remoteParent(),
+        ));
+        $child = $tracer->startSpan('SOAP ReservarAereo');
+        $child->end();
+        $open = $tracer->startSpan('SELECT');
+
+        // The process dies here: neither $open nor $root reach their end().
+        Observability::shutdown();
+
+        $exported = $client->spansById();
+        $rootId = $root->context()->spanId();
+        self::assertArrayHasKey($rootId, $exported, 'the open consumer span must not be thrown away at shutdown');
+        self::assertArrayHasKey($open->context()->spanId(), $exported);
+        self::assertSame($rootId, $exported[$child->context()->spanId()]['parentSpanId']);
+        self::assertSame($rootId, $exported[$open->context()->spanId()]['parentSpanId']);
+
+        $attributes = self::attributes($exported[$rootId]);
+        self::assertTrue($attributes['elven.span.incomplete']);
+        self::assertSame('process_shutdown', $attributes['elven.span.end_reason']);
+        self::assertSame(
+            'STATUS_CODE_UNSET',
+            $exported[$rootId]['status']['code'],
+            'a deliberate exit is not an error of the span'
+        );
+        self::assertArrayNotHasKey('elven.span.incomplete', self::attributes($exported[$child->context()->spanId()]));
+        self::assertNull($tracer->currentSpan());
+    }
+
+    /**
+     * The request scope (ShutdownRegistry) must finalize the SERVER span BEFORE
+     * endActiveSpans() ends whatever is still open. In the other order every FPM
+     * request that ends by exit/die, the case the scope exists for, exports its
+     * SERVER span as incomplete and without http.response.status_code.
+     */
+    public function testServerScopeIsFinalizedBeforeOpenSpansAreEnded(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/rest/v2/order/check';
+        Observability::init(array(
+            'service_name' => 'local-root-server-scope-test',
+            'metrics_exporter' => 'none',
+            'logs_exporter' => 'none',
+        ));
+        $client = self::recordingClient();
+        self::replaceTraceClient($client);
+        error_clear_last();
+
+        $scope = HttpServerInstrumentation::begin('/rest/v2/order/check', function () {
+            return 404;
+        });
+        $serverId = $scope->span()->context()->spanId();
+        $open = Observability::tracer()->startSpan('SELECT');
+
+        // The front controller calls exit here: neither $open nor the scope finish.
+        Observability::shutdown();
+
+        $exported = $client->spansById();
+        self::assertArrayHasKey($serverId, $exported);
+        self::assertArrayHasKey($open->context()->spanId(), $exported);
+        self::assertSame($serverId, $exported[$open->context()->spanId()]['parentSpanId']);
+
+        $server = self::attributes($exported[$serverId]);
+        self::assertArrayHasKey('http.response.status_code', $server, 'SERVER span lost its HTTP status');
+        self::assertSame('404', $server['http.response.status_code']);
+        self::assertArrayNotHasKey('elven.span.incomplete', $server, 'the scope finalized the SERVER span, it is not incomplete');
+        self::assertTrue(self::attributes($exported[$open->context()->spanId()])['elven.span.incomplete']);
+    }
+
+    public function testFatalErrorAtShutdownMarksTheOpenSpanAsError(): void
+    {
+        $autoload = realpath(__DIR__ . '/../../vendor/autoload.php');
+        self::assertNotFalse($autoload);
+        $script = tempnam(sys_get_temp_dir(), 'elven-fatal-');
+        self::assertNotFalse($script);
+        file_put_contents($script, self::fatalProbe((string) $autoload));
+
+        $output = array();
+        exec(
+            escapeshellarg(PHP_BINARY) . ' -d display_errors=stderr -d log_errors=0 '
+            . escapeshellarg($script) . ' 2>/dev/null',
+            $output,
+            $exitCode
+        );
+        unlink($script);
+
+        self::assertSame(255, $exitCode, 'pre-condition: the probe dies of a fatal error');
+        $spans = array();
+        $rootId = null;
+        foreach ($output as $line) {
+            if (strpos($line, 'ROOT ') === 0) {
+                $rootId = substr($line, 5);
+            }
+            if (strpos($line, 'EXPORT ') === 0) {
+                $payload = json_decode(substr($line, 7), true);
+                foreach ($payload['resourceSpans'][0]['scopeSpans'][0]['spans'] as $span) {
+                    $spans[$span['spanId']] = $span;
+                }
+            }
+        }
+
+        self::assertNotNull($rootId);
+        self::assertArrayHasKey($rootId, $spans, 'the open span of a process that died of a fatal must be exported');
+        self::assertSame('STATUS_CODE_ERROR', $spans[$rootId]['status']['code']);
+        $attributes = self::attributes($spans[$rootId]);
+        self::assertTrue($attributes['elven.span.incomplete']);
+        self::assertSame('process_shutdown', $attributes['elven.span.end_reason']);
+    }
+
     /**
      * @return array{0: Tracer, 1: SpanProcessor}
      */
@@ -343,6 +470,15 @@ final class LocalRootSurvivalTest extends TestCase
         return $orphans;
     }
 
+    private static function replaceTraceClient($client)
+    {
+        $handle = Observability::init();
+        $processor = self::getPrivate($handle, 'spanProcessor');
+        $exporter = self::getPrivate($processor, 'exporter');
+        self::assertInstanceOf(OtlpHttpJsonTraceExporter::class, $exporter);
+        self::setPrivate($exporter, 'client', $client);
+    }
+
     private static function remoteParent()
     {
         return new SpanContext(self::REMOTE_TRACE_ID, self::REMOTE_SPAN_ID, '01', '', true, true);
@@ -379,6 +515,15 @@ final class LocalRootSurvivalTest extends TestCase
         };
     }
 
+    private static function attributes(array $span)
+    {
+        $attributes = array();
+        foreach ($span['attributes'] as $attribute) {
+            $attributes[$attribute['key']] = current($attribute['value']);
+        }
+        return $attributes;
+    }
+
     private static function getPrivate($object, $property)
     {
         $reflection = new \ReflectionProperty(get_class($object), $property);
@@ -391,5 +536,53 @@ final class LocalRootSurvivalTest extends TestCase
         $reflection = new \ReflectionProperty(get_class($object), $property);
         $reflection->setAccessible(true);
         $reflection->setValue($object, $value);
+    }
+
+    private static function fatalProbe($autoload)
+    {
+        return '<?php
+require ' . var_export($autoload, true) . ';
+
+use Elven\Observability\PhpLegacy\Observability;
+use Elven\Observability\PhpLegacy\Trace\Span;
+use Elven\Observability\PhpLegacy\Trace\SpanContext;
+
+$handle = Observability::init(array(
+    "service_name" => "local-root-fatal-probe",
+    "metrics_exporter" => "none",
+    "logs_exporter" => "none",
+));
+$read = function ($object, $property) {
+    $reflection = new ReflectionProperty(get_class($object), $property);
+    $reflection->setAccessible(true);
+    return array($reflection, $reflection->getValue($object));
+};
+list(, $processor) = $read($handle, "spanProcessor");
+list(, $exporter) = $read($processor, "exporter");
+list($clientProperty) = $read($exporter, "client");
+$clientProperty->setValue($exporter, new class {
+    public function post($url, array $payload)
+    {
+        echo "EXPORT " . json_encode($payload) . "\n";
+        return true;
+    }
+});
+
+$root = Observability::tracer()->startSpan("Message consume queue", array(
+    "kind" => Span::KIND_CONSUMER,
+    "parent_context" => new SpanContext(
+        "' . self::REMOTE_TRACE_ID . '",
+        "' . self::REMOTE_SPAN_ID . '",
+        "01",
+        "",
+        true,
+        true
+    ),
+));
+echo "ROOT " . $root->context()->spanId() . "\n";
+Observability::tracer()->startSpan("SELECT")->end();
+
+elven_undefined_function_to_force_a_fatal_error();
+';
     }
 }

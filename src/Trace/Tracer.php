@@ -126,6 +126,49 @@ final class Tracer
         $this->spanStack = array();
     }
 
+    /**
+     * Ends, innermost first, every span still open on the stack and empties it.
+     *
+     * Meant for process shutdown: when PHP dies in the middle of a unit of work
+     * (fatal error, exit), the finally of withSpan() never runs and the spans that
+     * wrap the work are still open. Clearing the stack without ending them throws
+     * away exactly the parents of the children that were already exported.
+     *
+     * Each span is marked elven.span.incomplete=true and elven.span.end_reason.
+     * The status becomes ERROR only when error_get_last() is a fatal error; a
+     * deliberate exit is not an error of the span and keeps the status it had.
+     *
+     * @param string $reason
+     * @return int number of spans ended here
+     */
+    public function endActiveSpans($reason = 'process_shutdown')
+    {
+        $stack = $this->spanStack;
+        $this->spanStack = array();
+        if (!$stack) {
+            return 0;
+        }
+
+        $fatal = self::lastErrorIsFatal();
+        $ended = 0;
+        foreach (array_reverse($stack) as $span) {
+            if (!$span instanceof Span || $span->isEnded()) {
+                continue;
+            }
+            try {
+                $span->setAttribute('elven.span.incomplete', true);
+                $span->setAttribute('elven.span.end_reason', (string) $reason);
+                if ($fatal) {
+                    $span->setStatus('ERROR', 'php fatal error before span end');
+                }
+                $span->end();
+                $ended++;
+            } catch (\Throwable $ignored) {
+            }
+        }
+        return $ended;
+    }
+
     public function deactivateSpan($span)
     {
         if ($span instanceof Span) {
@@ -140,6 +183,19 @@ final class Tracer
             $this->processor->onEnd($span);
         } catch (\Throwable $ignored) {
         }
+    }
+
+    private static function lastErrorIsFatal()
+    {
+        $error = error_get_last();
+        if (!is_array($error)) {
+            return false;
+        }
+        return in_array(
+            (int) $error['type'],
+            array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR),
+            true
+        );
     }
 
     private function removeFromStack(Span $span)
