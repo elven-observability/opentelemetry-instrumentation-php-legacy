@@ -24,6 +24,14 @@ final class UrlSanitizer
                 continue;
             }
             if (self::isSensitiveKey($decoded)) {
+                // A key word marks the NEXT segment as its value, but this segment
+                // is still a value the consumer sent: `cpf_12345678901` and
+                // `session_20260910` used to skip every identifier check below and
+                // went through raw. It stays a key either way.
+                $sanitized = self::sanitizePathSegment($decoded);
+                if ($sanitized !== $decoded) {
+                    $segments[$index] = $sanitized;
+                }
                 $previousSensitive = true;
                 continue;
             }
