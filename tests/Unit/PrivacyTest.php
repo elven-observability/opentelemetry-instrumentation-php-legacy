@@ -284,6 +284,75 @@ final class PrivacyTest extends TestCase
         );
     }
 
+    /**
+     * An identifier glued to a key word is still an identifier.
+     *
+     * `sanitizePath()` reads a segment that contains a key word (`session`,
+     * `token`, `cpf`, `email`, `card`...) as the NAME of the next segment and
+     * redacts that one -- but it skipped the identifier checks on the key segment
+     * itself. `cpf_12345678901` went through as a label value on every version, and
+     * `session_20260910` started going through once the letter+digit rule was
+     * relaxed (0.7.0 still caught it as a 16+ character opaque token).
+     *
+     * `result`, `error_category` and `dependency_type` go through the same
+     * `sanitizePath()` (in `normalizeVocabularyLabel()`), so they are covered too.
+     *
+     * @dataProvider identifiersGluedToAKeyWordProvider
+     */
+    public function testIdentifiersGluedToAKeyWordStillCollapse(string $key, string $value, string $expected): void
+    {
+        $redactor = new AttributeRedactor(EnvConfigResolver::resolve());
+
+        self::assertSame(
+            $expected,
+            $redactor->redactMetricLabels(array($key => $value), array($key))[$key],
+            sprintf('`%s=%s` carries an identifier and must never become a series', $key, $value)
+        );
+    }
+
+    public function identifiersGluedToAKeyWordProvider(): array
+    {
+        return array(
+            'operation: order number after session' => array('operation', 'session_20260910', '{id}'),
+            'operation: cpf after the cpf key word'  => array('operation', 'cpf_12345678901', '{cpf}'),
+            'error_type: number after email'         => array('error_type', 'email_201211', '{id}'),
+            'dependency_name: number glued to card'  => array('dependency_name', 'card201211', '{id}'),
+            'route: id segment named like a key'     => array('route', '/order/session_20260910', '/order/{id}'),
+            'route: key segment keeps marking next'  => array('route', '/token_20260910/abc', '/{id}/{redacted}'),
+            'result: vocabulary label goes through it too' => array('result', 'Session_20260910', '{id}'),
+            // Was `{id}` before this check (the whole-value UUID rule) and must stay
+            // `{id}`: the key segment must not rename a placeholder to `{cpf}`.
+            'operation: uuid after session stays an id' => array('operation', 'session_550e8400-e29b-41d4-a716-446655440000', '{id}'),
+        );
+    }
+
+    /**
+     * Positive control for the test above: checking the key segment must not
+     * erase a NAME that merely contains a key word, and the key segment still
+     * marks the next one as its value.
+     */
+    public function testKeyWordNamesSurviveAndStillMarkTheNextSegment(): void
+    {
+        $redactor = new AttributeRedactor(EnvConfigResolver::resolve());
+
+        $names = array(
+            array('operation', 'payment.credit_card.authorize.full'),
+            array('operation', 'feature_flag.credit_card_payment'),
+            array('error_type', 'invalid_card'),
+            array('dependency_name', 'token-service'),
+        );
+        foreach ($names as $case) {
+            list($key, $value) = $case;
+            self::assertSame(
+                $value,
+                $redactor->redactMetricLabels(array($key => $value), array($key))[$key],
+                sprintf('`%s=%s` is a name, not an identifier', $key, $value)
+            );
+        }
+
+        self::assertSame('/token/{redacted}', UrlSanitizer::sanitizePath('/token/abc'));
+    }
+
     public function testUrlPathSegmentsFollowTheSameRules(): void
     {
         self::assertSame('/order/{id}', UrlSanitizer::sanitizePath('/order/reserva_201211'));
