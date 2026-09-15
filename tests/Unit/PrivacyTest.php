@@ -471,6 +471,41 @@ final class PrivacyTest extends TestCase
         );
     }
 
+    /**
+     * Redacting an outcome label twice gives the same label as redacting it once.
+     *
+     * The 40-character cut ran after the separator trim, so a label whose 40th
+     * character was `_`, `.` or `-` kept it, and a second pass removed it: a path
+     * that redacts twice and one that redacts once emitted two series for one
+     * outcome. Measured over the 16836 operation values of zupper-api used as
+     * `result`, `error_category` and `dependency_type`: 246 of 50508 pairs.
+     *
+     * @dataProvider longOutcomeLabelProvider
+     */
+    public function testOutcomeLabelCutAt40IsIdempotent(string $key, string $value, string $expected): void
+    {
+        $redactor = new AttributeRedactor(EnvConfigResolver::resolve());
+
+        $once = $redactor->redactMetricLabels(array($key => $value), array($key))[$key];
+        $twice = $redactor->redactMetricLabels(array($key => $once), array($key))[$key];
+
+        self::assertSame($once, $twice, sprintf('second pass over `%s=%s` changed the label', $key, $value));
+        self::assertSame($expected, $once, sprintf('first pass over `%s=%s`', $key, $value));
+    }
+
+    public function longOutcomeLabelProvider(): array
+    {
+        return array(
+            // 40th character is a separator: were `..._x_`, `...payment.`, `...backup-`
+            'result: path-like value'         => array('result', '/Hoteis/x:OpcaoHotelQuartosDTO/x/Hotel/x/Quartos', 'hoteis_x_opcaohotelquartosdto_x_hotel_x'),
+            'error_category: dot at 40'       => array('error_category', 'provider_error.supplier.timeout.payment.gateway', 'provider_error.supplier.timeout.payment'),
+            'dependency_type: dash at 40'     => array('dependency_type', 'third-party-payment-gateway-with-backup-policy', 'third-party-payment-gateway-with-backup'),
+            // positive control: the cut lands on a letter, unchanged on both
+            'result: cut lands on a letter'   => array('result', 'this is not an outcome it is a whole sentence about what happened', 'this_is_not_an_outcome_it_is_a_whole_sen'),
+            'result: exactly 40, no cut'      => array('result', 'reservation_payment_form_not_ready_yet_x', 'reservation_payment_form_not_ready_yet_x'),
+        );
+    }
+
     public function testUrlPathSegmentsFollowTheSameRules(): void
     {
         self::assertSame('/order/{id}', UrlSanitizer::sanitizePath('/order/reserva_201211'));

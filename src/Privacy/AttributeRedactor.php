@@ -293,9 +293,16 @@ final class AttributeRedactor
             return 'unknown';
         }
 
-        return strlen($token) > self::MAX_VOCABULARY_LABEL
-            ? substr($token, 0, self::MAX_VOCABULARY_LABEL)
-            : $token;
+        if (strlen($token) > self::MAX_VOCABULARY_LABEL) {
+            // Cut, THEN trim the separators again. Trimming only before the cut left
+            // `hoteis_x_opcaohotelquartosdto_x_hotel_x_` when the 40th character was
+            // a separator, and a second pass over that label (any path that redacts
+            // twice) returned it without the `_`: one outcome, two series. Cannot
+            // become empty: the first character is not a separator (trimmed above).
+            $token = trim(substr($token, 0, self::MAX_VOCABULARY_LABEL), '_.-');
+        }
+
+        return $token;
     }
 
     /**
