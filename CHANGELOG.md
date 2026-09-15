@@ -1,8 +1,29 @@
 # Changelog
 
-## Unreleased
+## 0.7.1 - 2026-09-15
 
-- **Added: `GuzzleInstrumentation::middleware()` accepts an optional settings array** (`middleware()` with no argument behaves exactly as before). Measured in a consumer on 2026-09-09: one trace, two `GET`s to the same internal service, both answering 404 ("no policy for this order"). The call wrapped by `HttpClientInstrumentation` carried the consumer's `dependency_name` and status `UNSET`; the call made through this middleware carried the raw host as `dependency_name`, status `ERROR` and `error.type=404`. The consumer had named the dependency in its own client factory and treats a 4xx as a legitimate answer, but the middleware had no way to receive either decision.
+**Upgrade note.** Fix release on top of 0.7.0; the constraint `^0.7` picks it up. Three observable changes to review before upgrading:
+- Messaging spans are named `Message publish <destination>` and `Message consume <destination>` again (0.6.0 had renamed them to `publish`/`process`). A saved query or dashboard that adopted the 0.6.x/0.7.0 names needs to switch back.
+- Label values that 0.7.0 wrongly rewrote to `{id}` now arrive as sent (for example `error_type="Missing404Exception"`), and some identifiers that 0.7.0 let through now become `{id}` (for example `reserva_201211`, `checkout.8f2a19c4b7e3a1b2c3d4`). A `.` now separates parts the way `_` already did, so a dotted generated host such as `a1b2c3d4e5.execute-api.us-east-1.amazonaws.com` collapses as a `dependency_name`.
+- Spans that were still open when PHP died are now exported, marked `elven.span.incomplete=true`.
+
+**Correction to the 0.7.0 notes.** They listed "bare numeric runs" among the identifiers that collapse to `{id}`. That held only when the digits were separated by a space, `-` or `.`: a run joined by `_` (`reserva_201211`, the shape a consumer builds most often) went through as a label value. Fixed below.
+
+### Fixed
+
+- **Identifier defence.** A run of four or more digits is now caught in any position, including after `_`. Names that carry a small number are no longer taken for identifiers: `Missing404Exception`, `BadRequest400Exception`, `Http2ProtocolError`, `allow_bearer_session_recovery_v2` and `checkout_revamp_v2_treatment` used to become `{id}` (not a 0.7.0 regression: `error_type`, `operation` and `dependency_name` went through the same check before). A value still has to contain an opaque part (8+ characters mixing letters and digits the way no word does) to collapse. Known trade-off: a random token with a single short digit run has the shape of a name with a number and is not caught.
+- **An identifier after a dot** skipped the hex and letter+digit rules (`checkout.8f2a19c4b7e3a1b2c3d4` went through). Both rules now judge each part between `.`, `_` or `-`.
+- **Identifiers sharing a path segment with a key word** (`session`, `token`, `cpf`, `email`, `card`) skipped every id check in `sanitizePath()`: `cpf_12345678901` was emitted as an `operation` label.
+- **A JWT glued to a word by `_`** went through `redactSensitiveText()` and `sanitizePath()`, which required a word boundary before `eyJ`. This also affects span attributes, headers, log fields and baggage, and only adds redaction.
+- **A UUID or a longer digit run was reported as `{cpf}`** in a path segment. The segment was already redacted; only the placeholder name changes to `{id}`.
+- **An outcome label cut at 40 characters could end in a separator** and change on a second pass, splitting one outcome into two series.
+- **Orphan spans.** `SpanProcessor` dropped anything past `max_spans_per_request`, first come first served; a parent ends after its children, so a unit of work that filled the budget lost exactly the parents its exported children pointed at. Local roots and parents of buffered spans now take one of 16 reserved slots, and the retry after a failed export keeps that capacity. Measured in a consumer: 86 orphan spans in one worker trace.
+- **Spans still open at shutdown** (fatal error, `exit`) were discarded after their children had been flushed. `Tracer::endActiveSpans()` now ends and exports them, marked `elven.span.incomplete=true` with `elven.span.end_reason`; the status turns `ERROR` only for a fatal error. It runs after `ShutdownRegistry::run()`, so the SERVER span of a request still gets its status code first.
+- **Messaging span names** restored to `Message publish <destination>` / `Message consume <destination>`, and pinned by a test.
+
+### Added
+
+- **`GuzzleInstrumentation::middleware()` accepts an optional settings array** (`middleware()` with no argument behaves exactly as before). Measured in a consumer on 2026-09-09: one trace, two `GET`s to the same internal service, both answering 404 ("no policy for this order"). The call wrapped by `HttpClientInstrumentation` carried the consumer's `dependency_name` and status `UNSET`; the call made through this middleware carried the raw host as `dependency_name`, status `ERROR` and `error.type=404`. The consumer had named the dependency in its own client factory and treats a 4xx as a legitimate answer, but the middleware had no way to receive either decision.
 - `dependency_name`: value of the span attribute. The span name, `server.address` and the `elven.php.dependency.duration` label keep the host (same split as `HttpClientInstrumentation::instrument()` and its `$attributes`), so no metric series changes identity.
 - `mark_client_errors` (default `true`): `false` leaves a 4xx CLIENT span `UNSET` and without `error.type`, whether the 4xx arrives as a response or as a rejection carrying the response; `http.response.status_code` is still recorded and the rejection still reaches the caller as the same object. A 5xx, a transport failure and a rejection without a 4xx response stay `ERROR`. `0`, `'0'`, `'false'`, `'no'` and `'off'` (any case) count as `false`, so a value read from the environment is not silently ignored; `null`, a blank string and any other value keep the default.
 - Unchanged and still covered by `testGuzzleMiddlewareSupportsPsr7AndMarksClientFourHundredAsError`: without the setting, a CLIENT 4xx is `ERROR`, as HTTP semconv recommends for CLIENT spans. The SERVER-side rule (4xx is `error_category=client`, span not `ERROR`) is unrelated and unchanged.
