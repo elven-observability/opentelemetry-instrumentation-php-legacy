@@ -17,8 +17,54 @@ final class TrafficSourceResolver
         'momondo',
         'partner_offers',
         'metasearch_other',
+        // Engines a consumer's front classifies and forwards (zupper-api,
+        // X-Metasearch-Engine). Until this change they were emitted by the consumer
+        // and folded into `other` here: the SERVER span said `voelivre`, every
+        // metric label and the worker said `other`.
+        'voelivre',
+        'voopter',
+        'melhoresdestinos',
     );
 
+    /**
+     * Social networks, always channel `social` unless an explicit medium says
+     * otherwise (paid social is `paid`). Exact tokens only: the consumer maps a
+     * referer HOST to these names with anchored matching, and a substring match
+     * here would reopen the spoofing it closed.
+     */
+    private static $socialSources = array(
+        'instagram',
+        'facebook',
+        'twitter',
+        'tiktok',
+        'pinterest',
+        'youtube',
+        'linkedin',
+        'whatsapp',
+    );
+
+    /** Organic search, channel `organic`. */
+    private static $organicSources = array(
+        'organic_search',
+        'bing',
+    );
+
+    /** Sources outside the families above that always map to themselves. */
+    private static $baseSources = array(
+        'unknown',
+        'other',
+        'google',
+        'front',
+        'mobile_app',
+        'backend',
+        'referral',
+    );
+
+    /**
+     * Cardinality: every metric point of a consumer carries
+     * traffic_source x traffic_channel x is_bot. {@see self::knownSources()} and
+     * this list are that multiplier; the unit test pins both sizes.
+     */
     private static $knownChannels = array(
         'owned',
         'metasearch',
@@ -26,6 +72,9 @@ final class TrafficSourceResolver
         'organic',
         'partner',
         'backoffice',
+        'social',
+        'email',
+        'referral',
         'unknown',
     );
 
@@ -51,6 +100,31 @@ final class TrafficSourceResolver
             'traffic_source' => $source,
             'traffic_channel' => $channel,
         );
+    }
+
+    /**
+     * Every value {@see self::normalizeSource()} can return.
+     *
+     * @return string[]
+     */
+    public static function knownSources()
+    {
+        return array_values(array_unique(array_merge(
+            self::$baseSources,
+            self::$metasearchSources,
+            self::$socialSources,
+            self::$organicSources
+        )));
+    }
+
+    /**
+     * Every value {@see self::normalizeChannel()} can return.
+     *
+     * @return string[]
+     */
+    public static function knownChannels()
+    {
+        return self::$knownChannels;
     }
 
     public static function normalizeSource($source)
@@ -101,6 +175,21 @@ final class TrafficSourceResolver
         if ($value === 'meta' || $value === 'metasearch' || $value === 'metabuscador') {
             return 'metasearch_other';
         }
+        if ($value === 'voe_livre') {
+            return 'voelivre';
+        }
+        if ($value === 'melhores_destinos') {
+            return 'melhoresdestinos';
+        }
+        if (in_array($value, self::$socialSources, true) || in_array($value, self::$organicSources, true)) {
+            return $value;
+        }
+        if ($value === 'organic' || $value === 'seo') {
+            return 'organic_search';
+        }
+        if ($value === 'referral') {
+            return 'referral';
+        }
 
         return 'other';
     }
@@ -125,6 +214,9 @@ final class TrafficSourceResolver
         }
         if ($value === 'backoffice' || $value === 'backend') {
             return 'backoffice';
+        }
+        if ($value === 'newsletter') {
+            return 'email';
         }
         return in_array($value, self::$knownChannels, true) ? $value : 'unknown';
     }
@@ -207,8 +299,14 @@ final class TrafficSourceResolver
         if ($source === 'google') {
             return 'paid';
         }
-        if ($source === 'other') {
-            return 'unknown';
+        if (in_array($source, self::$socialSources, true)) {
+            return 'social';
+        }
+        if (in_array($source, self::$organicSources, true)) {
+            return 'organic';
+        }
+        if ($source === 'referral') {
+            return 'referral';
         }
         return 'unknown';
     }
