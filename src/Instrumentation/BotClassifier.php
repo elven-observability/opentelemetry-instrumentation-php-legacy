@@ -33,11 +33,25 @@ final class BotClassifier
      * @var array<string,string>
      */
     private static $signatures = array(
-        'search_engine' => '/googlebot|google-inspectiontool|storebot-google|bingbot|adidxbot|slurp|duckduckbot|baiduspider|yandex(bot|images|mobilebot)|sogou|exabot|applebot|petalbot|gptbot|oai-searchbot|chatgpt-user|perplexitybot|claudebot|amazonbot/',
+        // adsbot-google (also -mobile), mediapartners-google, googleother and
+        // apis-google are Google crawlers by their published User-Agents: AdsBot
+        // only reached generic_bot through `bot\b`, the other three were human.
+        'search_engine' => '/googlebot|google-inspectiontool|storebot-google|adsbot-google|mediapartners-google|googleother|apis-google|bingbot|adidxbot|slurp|duckduckbot|baiduspider|yandex(bot|images|mobilebot)|sogou|exabot|applebot|petalbot|gptbot|oai-searchbot|chatgpt-user|perplexitybot|claudebot|amazonbot/',
         'social' => '/facebookexternalhit|facebot|twitterbot|linkedinbot|whatsapp|telegrambot|slackbot|slack-imgproxy|discordbot|pinterest(bot)?|redditbot|skypeuripreview/',
         'seo' => '/ahrefsbot|semrushbot|mj12bot|dotbot|rogerbot|screaming\s?frog|seokicks|sistrix|dataforseo|blexbot|barkrowler/',
-        'monitoring' => '/pingdom|uptimerobot|statuscake|site24x7|datadog|newrelicpinger|gtmetrix|lighthouse|pagespeed|chrome-lighthouse|catchpoint/',
-        'tooling' => '/python-requests|python-urllib|aiohttp|curl\/|wget|scrapy|go-http-client|java\/|jakarta|apache-httpclient|libwww|okhttp|axios|node-fetch|got\s|guzzle|headlesschrome|phantomjs|puppeteer|playwright|selenium/',
+        // kube-probe (Kubernetes liveness/readiness), Blackbox Exporter
+        // (Prometheus probing) and SyntheticMonitor: all three seen on a consumer's
+        // production API (zupper-api, 2026-09-16). The first two were counted as
+        // human demand; SyntheticMonitor only reached generic_bot via `monitor`.
+        'monitoring' => '/pingdom|uptimerobot|statuscake|site24x7|datadog|newrelicpinger|gtmetrix|lighthouse|pagespeed|chrome-lighthouse|catchpoint|kube-probe|blackbox exporter|syntheticmonitor/',
+        // `okhttp` stays here on purpose. It is the default User-Agent of Android
+        // apps built on OkHttp, but also of any JVM/Kotlin script, and the User-Agent
+        // alone cannot tell them apart. A consumer that knows its own app (a
+        // first-party credential plus the exact `okhttp/<version>` token) should
+        // reclassify with that context; see docs/traffic-attribution.md.
+        // apache-cxf: Java web-services client, same family as apache-httpclient;
+        // seen on the same production API calling the search endpoint.
+        'tooling' => '/python-requests|python-urllib|aiohttp|curl\/|wget|scrapy|go-http-client|java\/|jakarta|apache-httpclient|apache-cxf|libwww|okhttp|axios|node-fetch|got\s|guzzle|headlesschrome|phantomjs|puppeteer|playwright|selenium/',
         'generic_bot' => '/bot\b|crawler|spider|crawl|fetcher|archiver|scraper|monitor/',
     );
 
