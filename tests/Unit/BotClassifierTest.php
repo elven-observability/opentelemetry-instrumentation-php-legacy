@@ -34,6 +34,38 @@ final class BotClassifierTest extends TestCase
             'chrome-human' => array('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36', false, 'none'),
             'iphone-safari' => array('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1', false, 'none'),
             'empty' => array('', false, 'none'),
+
+            // --- Mobile app HTTP stacks. ---
+            // okhttp/<v> is the default User-Agent of Android apps built on OkHttp,
+            // and of JVM/Kotlin scripts too: from the User-Agent alone it stays
+            // tooling. A consumer reclassifies its own app with context (credential).
+            'okhttp-stays-tooling' => array('okhttp/4.9.2', true, 'tooling'),
+            // Negative control: the iOS build of the same app is human.
+            'ios-app-cfnetwork' => array('ZupperApp/1 CFNetwork/3860.700.2 Darwin/25.6.0', false, 'none'),
+
+            // --- Probes and synthetic monitors seen in production (zupper-api, 2026-09-16). ---
+            // kube-probe and Blackbox Exporter were counted as HUMAN demand.
+            'kube-probe' => array('kube-probe/1.28', true, 'monitoring'),
+            'blackbox-exporter' => array('Blackbox Exporter/v1.16.1', true, 'monitoring'),
+            // Already a bot through the generic `monitor` token; the category was wrong.
+            'synthetic-monitor' => array('Mozilla/5.0 (compatible; SyntheticMonitor/1.0)', true, 'monitoring'),
+
+            // --- Server-side HTTP client framework seen in production (2026-09-16). ---
+            // Same family as Apache-HttpClient, which was already tooling.
+            'apache-cxf' => array('Apache-CXF/3.6.2', true, 'tooling'),
+
+            // --- Google crawlers, User-Agent strings as published by Google. ---
+            // AdsBot was a bot through `bot\b` but landed in generic_bot; the other
+            // three were not detected at all.
+            'adsbot-google' => array('AdsBot-Google (+http://www.google.com/adsbot.html)', true, 'search_engine'),
+            'adsbot-google-mobile' => array('Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1 (compatible; AdsBot-Google-Mobile; +http://www.google.com/mobile/adsbot.html)', true, 'search_engine'),
+            'mediapartners-google' => array('Mediapartners-Google', true, 'search_engine'),
+            'googleother' => array('Mozilla/5.0 (compatible; GoogleOther)', true, 'search_engine'),
+            'apis-google' => array('APIs-Google (+https://developers.google.com/webmasters/APIs-Google.html)', true, 'search_engine'),
+
+            // --- Negative controls for the new tokens: substrings a browser can carry. ---
+            'chrome-on-google-tv' => array('Mozilla/5.0 (Linux; Android 12; Google TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36', false, 'none'),
+
             'non-string' => array(null, false, 'none'),
             'array-input' => array(array('x'), false, 'none'),
         );
