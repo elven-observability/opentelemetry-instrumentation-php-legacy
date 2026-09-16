@@ -100,4 +100,46 @@ final class BaggageContextTest extends TestCase
         self::assertArrayNotHasKey('upstream_key', $ctx2, 'request 1 baggage must not leak into request 2');
         self::assertSame('false', $ctx2['is_bot']);
     }
+
+    /**
+     * bot.category must reach the next process. Before this, only is_bot rode the
+     * baggage: the reservation worker (CONSUMER span, same trace) could say THAT
+     * a purchase came from a bot but never WHICH kind -- a health probe, a search
+     * crawler and a script all looked the same there.
+     */
+    public function testServerSpanPropagatesBotCategoryInTheBaggage(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/rest/v2/aerial/search';
+        $_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (compatible; Googlebot/2.1)';
+        HttpServerInstrumentation::startFromGlobals('/rest/v2/aerial/search');
+
+        self::assertSame('search_engine', RequestContext::get('bot.category'));
+        $headers = HeaderInjector::inject(array());
+        self::assertStringContainsString('is_bot=true', $headers['baggage']);
+        self::assertStringContainsString('bot.category=search_engine', $headers['baggage']);
+
+        // Human: the category is explicit, not absent, so downstream can tell
+        // "classified human" from "never classified".
+        $_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (Windows NT 10.0) Chrome/124';
+        HttpServerInstrumentation::startFromGlobals('/rest/v2/session/login');
+        self::assertSame('none', RequestContext::get('bot.category'));
+    }
+
+    /**
+     * Inbound baggage is client-controlled. The server's own classification must
+     * overwrite a forged is_bot / bot.category, exactly as it already did for
+     * traffic_source.
+     */
+    public function testForgedInboundBotBaggageIsOverwrittenByTheServerClassification(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/rest/v2/aerial/search';
+        $_SERVER['HTTP_USER_AGENT'] = 'kube-probe/1.28';
+        $_SERVER['HTTP_BAGGAGE'] = 'is_bot=false,bot.category=human_forjado';
+        HttpServerInstrumentation::startFromGlobals('/rest/v2/aerial/search');
+
+        self::assertSame('true', RequestContext::get('is_bot'));
+        self::assertSame('monitoring', RequestContext::get('bot.category'));
+    }
 }

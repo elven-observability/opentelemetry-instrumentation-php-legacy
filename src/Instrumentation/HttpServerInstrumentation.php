@@ -102,6 +102,12 @@ final class HttpServerInstrumentation
                     RequestContext::set('traffic_channel', $traffic['traffic_channel']);
                 }
                 RequestContext::set('is_bot', $bot['is_bot'] ? 'true' : 'false');
+                // The category rides along so the next process (a queue worker's
+                // CONSUMER span, a downstream service) can tell a probe from a
+                // crawler from a script. Set AFTER the inbound merge on purpose:
+                // a client-sent `bot.category` is overwritten here, as is_bot and
+                // traffic_source already were. Six fixed values, never the UA.
+                RequestContext::set('bot.category', $bot['category']);
             } catch (\Throwable $ignored) {
             }
         }
