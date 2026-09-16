@@ -3,6 +3,8 @@
 namespace Elven\Observability\PhpLegacy\Tests\Unit;
 
 use Elven\Observability\PhpLegacy\Attribution\TrafficSourceResolver;
+use Elven\Observability\PhpLegacy\Config\EnvConfigResolver;
+use Elven\Observability\PhpLegacy\Privacy\AttributeRedactor;
 use Elven\Observability\PhpLegacy\Tests\Support\Env;
 use PHPUnit\Framework\TestCase;
 
@@ -191,5 +193,129 @@ final class TrafficSourceResolverTest extends TestCase
         ), TrafficSourceResolver::attributesFromRequest(array(
             'traffic_source' => 'front',
         ), array()));
+    }
+
+    /**
+     * Sources a consumer ALREADY emits and this library used to fold into
+     * `other`. Measured in zupper-api (2026-09-15): its request context resolves
+     * `voelivre`, `voopter` and `melhoresdestinos` (front header
+     * X-Metasearch-Engine) and the social networks (forwarded referer / utm).
+     * The SERVER span kept the name -- span attributes are not normalized -- but
+     * every metric label and the reservation worker (which re-normalizes the
+     * baggage) read `other`, and `social` as channel read `unknown`. A Tempo
+     * search for `traffic_source=voelivre` found the request and not the sale.
+     */
+    public function testMetasearchEnginesTheConsumerEmitsKeepTheirNameAndIntrinsicChannel(): void
+    {
+        foreach (array('voelivre', 'voopter', 'melhoresdestinos') as $engine) {
+            self::assertSame($engine, TrafficSourceResolver::normalizeSource($engine));
+            self::assertSame(array(
+                'traffic_source' => $engine,
+                'traffic_channel' => 'metasearch',
+            ), TrafficSourceResolver::attributesFromSource($engine));
+            // Intrinsic, like every other metasearch partner: a marketing medium
+            // in the payload does not move the sale out of the channel.
+            self::assertSame(array(
+                'traffic_source' => $engine,
+                'traffic_channel' => 'metasearch',
+            ), TrafficSourceResolver::attributesFromRequest(array(
+                'utm_source' => $engine,
+                'utm_medium' => 'cpc',
+            )));
+        }
+        self::assertSame('melhoresdestinos', TrafficSourceResolver::normalizeSource('Melhores Destinos'));
+        self::assertSame('voelivre', TrafficSourceResolver::normalizeSource('Voe Livre'));
+    }
+
+    public function testSocialNetworksTheConsumerEmitsKeepTheirNameOnTheSocialChannel(): void
+    {
+        foreach (array('instagram', 'facebook', 'twitter', 'tiktok', 'pinterest', 'youtube', 'linkedin', 'whatsapp') as $network) {
+            self::assertSame($network, TrafficSourceResolver::normalizeSource($network));
+            self::assertSame(array(
+                'traffic_source' => $network,
+                'traffic_channel' => 'social',
+            ), TrafficSourceResolver::attributesFromSource($network));
+        }
+        self::assertSame('social', TrafficSourceResolver::normalizeChannel('social'));
+        // A social network is not intrinsic: paid social stays paid.
+        self::assertSame(array(
+            'traffic_source' => 'instagram',
+            'traffic_channel' => 'paid',
+        ), TrafficSourceResolver::attributesFromRequest(array(
+            'utm_source' => 'instagram',
+            'utm_medium' => 'cpc',
+        )));
+    }
+
+    public function testOrganicSearchReferralAndEmailAreFirstClass(): void
+    {
+        self::assertSame(array('traffic_source' => 'organic_search', 'traffic_channel' => 'organic'), TrafficSourceResolver::attributesFromSource('organic_search'));
+        self::assertSame(array('traffic_source' => 'organic_search', 'traffic_channel' => 'organic'), TrafficSourceResolver::attributesFromSource('organic'));
+        self::assertSame(array('traffic_source' => 'bing', 'traffic_channel' => 'organic'), TrafficSourceResolver::attributesFromSource('bing'));
+        self::assertSame(array('traffic_source' => 'referral', 'traffic_channel' => 'referral'), TrafficSourceResolver::attributesFromSource('referral'));
+        self::assertSame('email', TrafficSourceResolver::normalizeChannel('email'));
+        self::assertSame('email', TrafficSourceResolver::normalizeChannel('newsletter'));
+        self::assertSame('referral', TrafficSourceResolver::normalizeChannel('referral'));
+    }
+
+    /**
+     * Negative controls: the vocabulary grew by exact tokens, not by substrings.
+     * A value that merely CONTAINS a known name is still `other`, and an invented
+     * channel is still `unknown`.
+     */
+    public function testVocabularyGrowthIsExactAndStillBounded(): void
+    {
+        foreach (array('fonte_inventada', 'notinstagram', 'instagram_ads_campaign_x', 'facebook-scam', 'voelivre2', 'referral_program_abc') as $value) {
+            self::assertSame('other', TrafficSourceResolver::normalizeSource($value), $value);
+        }
+        foreach (array('canal_inventado', 'sociall', 'push') as $value) {
+            self::assertSame('unknown', TrafficSourceResolver::normalizeChannel($value), $value);
+        }
+    }
+
+    /**
+     * Cardinality tripwire. Every metric point of a consumer carries
+     * traffic_source x traffic_channel x is_bot, so these two lists ARE the
+     * multiplier. Growing them must be a conscious change to this test.
+     */
+    public function testKnownVocabularyIsClosedAndRoundTrips(): void
+    {
+        $sources = TrafficSourceResolver::knownSources();
+        $channels = TrafficSourceResolver::knownChannels();
+
+        self::assertCount(29, $sources);
+        self::assertCount(10, $channels);
+        self::assertSame($sources, array_values(array_unique($sources)));
+        foreach ($sources as $source) {
+            self::assertSame($source, TrafficSourceResolver::normalizeSource($source), 'source ' . $source);
+        }
+        foreach ($channels as $channel) {
+            self::assertSame($channel, TrafficSourceResolver::normalizeChannel($channel), 'channel ' . $channel);
+        }
+    }
+
+    /**
+     * The metric label path is where the names were lost: AttributeRedactor
+     * normalizes traffic_source/traffic_channel with this resolver on EVERY point
+     * (request histogram, dependency histogram, consumer counters).
+     */
+    public function testMetricLabelsKeepTheNewVocabulary(): void
+    {
+        $redactor = new AttributeRedactor(EnvConfigResolver::resolve());
+        $allowed = array('traffic_source', 'traffic_channel', 'is_bot');
+
+        self::assertSame(
+            array('traffic_source' => 'voelivre', 'traffic_channel' => 'metasearch', 'is_bot' => 'false'),
+            $redactor->redactMetricLabels(array('traffic_source' => 'voelivre', 'traffic_channel' => 'metasearch', 'is_bot' => 'false'), $allowed)
+        );
+        self::assertSame(
+            array('traffic_source' => 'instagram', 'traffic_channel' => 'social', 'is_bot' => 'true'),
+            $redactor->redactMetricLabels(array('traffic_source' => 'instagram', 'traffic_channel' => 'social', 'is_bot' => 'true'), $allowed)
+        );
+        // Forged values keep collapsing.
+        self::assertSame(
+            array('traffic_source' => 'other', 'traffic_channel' => 'unknown'),
+            $redactor->redactMetricLabels(array('traffic_source' => 'fonte-inventada', 'traffic_channel' => 'canal-inventado'), $allowed)
+        );
     }
 }
