@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+**Upgrade note.** Two label changes to review before upgrading:
+- `is_bot` on requests from Android apps: `okhttp/<version>` is no longer a bot. Measured in a consumer on 2026-09-16: its Android app (`okhttp/4.9.2`, purchases included) was `is_bot=true`/`tooling`, about half of its `mobile_app` request samples. Panels that split human vs bot demand will move that traffic to human.
+- `traffic_source` / `traffic_channel` values that collapsed to `other` / `unknown` now keep their name: `voelivre`, `voopter`, `melhoresdestinos` (channel `metasearch`), eight social networks (channel `social`), `organic_search` and `bing` (channel `organic`), `referral`; channels `social`, `email`, `referral`. The domain grows from 15 x 7 to 29 x 10 pairs.
+
+### Fixed
+
+- **`okhttp` classified as tooling.** It is the default User-Agent of Android apps built on OkHttp, React Native included. The iOS build of the same app was already human.
+- **Forged `bot.category` in inbound baggage** went through to every outbound call. The server's classification now overwrites it.
+
+### Added
+
+- **Bot signatures seen in production:** `kube-probe` and `Blackbox Exporter` (were human), `SyntheticMonitor` (was `generic_bot`) -> `monitoring`; `Apache-CXF` -> `tooling`. Google crawlers by published User-Agent: `AdsBot-Google` (was `generic_bot`), `Mediapartners-Google`, `GoogleOther`, `APIs-Google` (were human) -> `search_engine`.
+- **`bot.category` in the baggage** next to `is_bot`, so a queue worker or downstream service in the same trace knows which kind of bot.
+- **Traffic vocabulary** above, plus `TrafficSourceResolver::knownSources()` / `knownChannels()` exposing the closed lists.
+
 ## 0.7.1 - 2026-09-15
 
 **Upgrade note.** Fix release on top of 0.7.0; the constraint `^0.7` picks it up. Three observable changes to review before upgrading:
