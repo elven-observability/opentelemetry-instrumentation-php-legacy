@@ -54,6 +54,8 @@ Recommended `traffic_channel` values:
 
 Unknown or high-cardinality-looking values are collapsed to `other` or `unknown`. Matching is by exact token: `instagram_ads_campaign_x` is `other`.
 
+Social, organic and referral sources are a fallback: `skyScannerCode`, `gclid`, the referer, `X-Traffic-Source` and `X-Metasearch-Engine` win over `utm_source=facebook`, exactly as they won when that value was `other`.
+
 A metasearch source always has channel `metasearch`, whatever medium travels with it. Any other source honours an explicit medium (`utm_medium=cpc` on `instagram` is `paid`).
 
 ## Cardinality
@@ -62,7 +64,7 @@ Every metric point carries `traffic_source` x `traffic_channel` x `is_bot`. The 
 
 ## Bot classification
 
-`BotClassifier` maps the User-Agent to `client.is_bot` and `bot.category` (`search_engine`, `social`, `seo`, `monitoring`, `tooling`, `generic_bot`, `none`) on the SERVER span. Only `is_bot` is a metric label. `is_bot` and `bot.category` both ride the W3C baggage, set after the inbound baggage is merged, so a client-sent value is overwritten. Mobile app HTTP stacks (`okhttp/...`, `<App>/1 CFNetwork/...`) are human.
+`BotClassifier` maps the User-Agent to `client.is_bot` and `bot.category` (`search_engine`, `social`, `seo`, `monitoring`, `tooling`, `generic_bot`, `none`) on the SERVER span. Only `is_bot` is a metric label. `is_bot` and `bot.category` both ride the W3C baggage, set after the inbound baggage is merged, so a client-sent value is overwritten. `<App>/1 CFNetwork/...` (iOS apps) is human. `okhttp/...` is `tooling`: the User-Agent of an Android app built on OkHttp and of a JVM script is the same string, so a consumer that knows its own app should reclassify it with context it trusts (for example a first-party credential), not by User-Agent alone. `node` and `undici` are human: they are the default User-Agent of server-side rendering.
 
 ## Usage
 

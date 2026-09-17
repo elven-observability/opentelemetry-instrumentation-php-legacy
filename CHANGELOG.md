@@ -1,19 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.7.2 - 2026-09-17
 
-**Upgrade note.** Two label changes to review before upgrading:
-- `is_bot` on requests from Android apps: `okhttp/<version>` is no longer a bot. Measured in a consumer on 2026-09-16: its Android app (`okhttp/4.9.2`, purchases included) was `is_bot=true`/`tooling`, about half of its `mobile_app` request samples. Panels that split human vs bot demand will move that traffic to human.
-- `traffic_source` / `traffic_channel` values that collapsed to `other` / `unknown` now keep their name: `voelivre`, `voopter`, `melhoresdestinos` (channel `metasearch`), eight social networks (channel `social`), `organic_search` and `bing` (channel `organic`), `referral`; channels `social`, `email`, `referral`. The domain grows from 15 x 7 to 29 x 10 pairs.
+**Upgrade note.** Label values change; review panels, alerts and recording rules that split traffic by origin or by bot before upgrading:
+- `traffic_source` / `traffic_channel` values that collapsed to `other` / `unknown` in metric labels, in the baggage and on consumer spans now keep their name: `voelivre`, `voopter`, `melhoresdestinos` (channel `metasearch`), eight social networks (channel `social`), `organic_search` and `bing` (channel `organic`), `referral`; channels `social`, `email`, `referral` (`newsletter` folds to `email`). The label domain grows from 15 x 7 to 29 x 10 pairs. Measured in a consumer on 2026-09-16: 0 SERVER spans with a source outside the old list in 3 hours, but 53,794 `other`/`unknown` and 27 `other`/`paid` request samples in 24 hours, part of which may now split into a named social or organic source.
+- **Precedence is unchanged.** A social, organic or referral source (`utm_source=facebook`) stays a fallback, as it was when it arrived as `other`: `skyScannerCode`, `gclid`, the referer, `X-Traffic-Source` and `X-Metasearch-Engine` still win over it. Without this rule the wider vocabulary would have moved metasearch and paid sales to `social`.
+- `is_bot` moves to `true` for probes and tools that were counted as people: `kube-probe`, `Blackbox Exporter`, `Uptime-Guardian`, `Uptime-Kuma` (`monitoring`), `Apache-CXF` and scripting/API-testing clients (`tooling`), and Google's `Mediapartners-Google`, `GoogleOther`, `APIs-Google` (`search_engine`). It moves to `false` for the Pinterest in-app browser and Cubot phones, which the old patterns matched by accident.
+- `okhttp/<version>` stays `tooling`. It is the User-Agent of Android apps built on OkHttp and of JVM scripts alike; a consumer that can tell its own app apart (a first-party credential) should reclassify with that context.
 
 ### Fixed
 
-- **`okhttp` classified as tooling.** It is the default User-Agent of Android apps built on OkHttp, React Native included. The iOS build of the same app was already human.
-- **Forged `bot.category` in inbound baggage** went through to every outbound call. The server's classification now overwrites it.
+- **Forged `bot.category` in inbound baggage** went through to every outbound call and queue message. The server's classification now overwrites it, like `is_bot`.
+- **Bot false positives:** `pinterest(bot)?` matched the Pinterest in-app browser, `bot\b` matched Cubot phone models.
 
 ### Added
 
-- **Bot signatures seen in production:** `kube-probe` and `Blackbox Exporter` (were human), `SyntheticMonitor` (was `generic_bot`) -> `monitoring`; `Apache-CXF` -> `tooling`. Google crawlers by published User-Agent: `AdsBot-Google` (was `generic_bot`), `Mediapartners-Google`, `GoogleOther`, `APIs-Google` (were human) -> `search_engine`.
+- **Bot signatures:** `kube-probe`, `Blackbox Exporter`, `SyntheticMonitor` (was `generic_bot`), `Uptime-Guardian`, `Uptime-Kuma` -> `monitoring`; `Apache-CXF`, `python-httpx`, `Java-http-client`, `PostmanRuntime`, `insomnia`, `HTTPie`, `RestSharp`, `go-resty`, `reqwest`, `Faraday`, `colly` -> `tooling`; `AdsBot-Google` (was `generic_bot`), `Mediapartners-Google`, `GoogleOther`, `APIs-Google` -> `search_engine`. `node` and `undici` stay human: they are the default User-Agent of server-side rendering calling an API for real users.
 - **`bot.category` in the baggage** next to `is_bot`, so a queue worker or downstream service in the same trace knows which kind of bot.
 - **Traffic vocabulary** above, plus `TrafficSourceResolver::knownSources()` / `knownChannels()` exposing the closed lists.
 
