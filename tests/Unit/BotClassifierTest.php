@@ -46,6 +46,9 @@ final class BotClassifierTest extends TestCase
             // --- Probes and synthetic monitors seen in production (zupper-api, 2026-09-16). ---
             // kube-probe and Blackbox Exporter were counted as HUMAN demand.
             'kube-probe' => array('kube-probe/1.28', true, 'monitoring'),
+            // Seen on a consumer's production login route (2026-09-16), counted as human.
+            'uptime-guardian' => array('Uptime-Guardian/1.0', true, 'monitoring'),
+            'uptime-kuma' => array('Uptime-Kuma/1.23.11', true, 'monitoring'),
             'blackbox-exporter' => array('Blackbox Exporter/v1.16.1', true, 'monitoring'),
             // Already a bot through the generic `monitor` token; the category was wrong.
             'synthetic-monitor' => array('Mozilla/5.0 (compatible; SyntheticMonitor/1.0)', true, 'monitoring'),

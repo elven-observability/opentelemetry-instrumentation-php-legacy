@@ -43,7 +43,7 @@ final class BotClassifier
         // (Prometheus probing) and SyntheticMonitor: all three seen on a consumer's
         // production API (zupper-api, 2026-09-16). The first two were counted as
         // human demand; SyntheticMonitor only reached generic_bot via `monitor`.
-        'monitoring' => '/pingdom|uptimerobot|statuscake|site24x7|datadog|newrelicpinger|gtmetrix|lighthouse|pagespeed|chrome-lighthouse|catchpoint|kube-probe|blackbox exporter|syntheticmonitor/',
+        'monitoring' => '/pingdom|uptimerobot|statuscake|site24x7|datadog|newrelicpinger|gtmetrix|lighthouse|pagespeed|chrome-lighthouse|catchpoint|kube-probe|blackbox exporter|syntheticmonitor|uptime-guardian|uptime-kuma/',
         // `okhttp` stays here on purpose. It is the default User-Agent of Android
         // apps built on OkHttp, but also of any JVM/Kotlin script, and the User-Agent
         // alone cannot tell them apart. A consumer that knows its own app (a
