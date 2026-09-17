@@ -37,7 +37,7 @@ final class BotClassifier
         // apis-google are Google crawlers by their published User-Agents: AdsBot
         // only reached generic_bot through `bot\b`, the other three were human.
         'search_engine' => '/googlebot|google-inspectiontool|storebot-google|adsbot-google|mediapartners-google|googleother|apis-google|bingbot|adidxbot|slurp|duckduckbot|baiduspider|yandex(bot|images|mobilebot)|sogou|exabot|applebot|petalbot|gptbot|oai-searchbot|chatgpt-user|perplexitybot|claudebot|amazonbot/',
-        'social' => '/facebookexternalhit|facebot|twitterbot|linkedinbot|whatsapp|telegrambot|slackbot|slack-imgproxy|discordbot|pinterest(bot)?|redditbot|skypeuripreview/',
+        'social' => '/facebookexternalhit|facebot|twitterbot|linkedinbot|whatsapp|telegrambot|slackbot|slack-imgproxy|discordbot|pinterestbot|redditbot|skypeuripreview/',
         'seo' => '/ahrefsbot|semrushbot|mj12bot|dotbot|rogerbot|screaming\s?frog|seokicks|sistrix|dataforseo|blexbot|barkrowler/',
         // kube-probe (Kubernetes liveness/readiness), Blackbox Exporter
         // (Prometheus probing) and SyntheticMonitor: all three seen on a consumer's
@@ -49,10 +49,13 @@ final class BotClassifier
         // alone cannot tell them apart. A consumer that knows its own app (a
         // first-party credential plus the exact `okhttp/<version>` token) should
         // reclassify with that context; see docs/traffic-attribution.md.
+        // python-httpx .. colly: scripting and API-testing clients. `node` and
+        // `undici` are NOT here: they are the default User-Agent of server-side
+        // rendering (Next.js/Node fetch), which calls an API on behalf of real users.
         // apache-cxf: Java web-services client, same family as apache-httpclient;
         // seen on the same production API calling the search endpoint.
-        'tooling' => '/python-requests|python-urllib|aiohttp|curl\/|wget|scrapy|go-http-client|java\/|jakarta|apache-httpclient|apache-cxf|libwww|okhttp|axios|node-fetch|got\s|guzzle|headlesschrome|phantomjs|puppeteer|playwright|selenium/',
-        'generic_bot' => '/bot\b|crawler|spider|crawl|fetcher|archiver|scraper|monitor/',
+        'tooling' => '/python-requests|python-urllib|aiohttp|curl\/|wget|scrapy|go-http-client|java\/|jakarta|apache-httpclient|apache-cxf|libwww|okhttp|axios|node-fetch|got\s|guzzle|headlesschrome|phantomjs|puppeteer|playwright|selenium|python-httpx|java-http-client|postmanruntime|insomnia\/|httpie|restsharp|go-resty|reqwest|faraday|colly/',
+        'generic_bot' => '/(?<!cu)bot\b|crawler|spider|crawl|fetcher|archiver|scraper|monitor/',
     );
 
     /**

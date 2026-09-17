@@ -69,6 +69,30 @@ final class BotClassifierTest extends TestCase
             // --- Negative controls for the new tokens: substrings a browser can carry. ---
             'chrome-on-google-tv' => array('Mozilla/5.0 (Linux; Android 12; Google TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36', false, 'none'),
 
+            // --- Scripting and API-testing clients (no production case; standard tool UAs). ---
+            'python-httpx' => array('python-httpx/0.27.0', true, 'tooling'),
+            'java-http-client' => array('Java-http-client/17.0.2', true, 'tooling'),
+            'postman' => array('PostmanRuntime/7.39.0', true, 'tooling'),
+            'insomnia' => array('insomnia/2023.5.8', true, 'tooling'),
+            'httpie' => array('HTTPie/3.2.2', true, 'tooling'),
+            'restsharp' => array('RestSharp/110.2.0.0', true, 'tooling'),
+            'go-resty' => array('go-resty/2.12.0 (https://github.com/go-resty/resty)', true, 'tooling'),
+            'reqwest' => array('reqwest/0.11.27', true, 'tooling'),
+            'faraday' => array('Faraday v2.9.0', true, 'tooling'),
+            'colly' => array('colly - https://github.com/gocolly/colly/v2', true, 'tooling'),
+            // Negative controls: server-side rendering calls an API for real users.
+            // A consumer measured `node` from its own website on search and login.
+            'node-ssr' => array('node', false, 'none'),
+            'undici-ssr' => array('undici', false, 'none'),
+
+            // --- False positives of the old patterns. ---
+            // Pinterest in-app browser is a person; only Pinterestbot crawls.
+            'pinterest-in-app-browser' => array('Mozilla/5.0 (Linux; Android 13; SM-A536B Build/TP1A.220624.014; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/116.0.5845.163 Mobile Safari/537.36 [Pinterest/Android]', false, 'none'),
+            'pinterestbot' => array('Mozilla/5.0 (compatible; Pinterestbot/1.0; +http://www.pinterest.com/bot.html)', true, 'social'),
+            // Cubot phones end the model token in `bot`.
+            'cubot-phone' => array('Mozilla/5.0 (Linux; Android 11; CUBOT X50) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36', false, 'none'),
+            'generic-bot-still-caught' => array('Mozilla/5.0 (compatible; MegaIndexBot/1.0)', true, 'generic_bot'),
+
             'non-string' => array(null, false, 'none'),
             'array-input' => array(array('x'), false, 'none'),
         );
