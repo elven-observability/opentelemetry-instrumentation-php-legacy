@@ -25,7 +25,7 @@ final class Observability
      * version). Keep this in sync with the composer package version / git tag
      * as part of the release checklist.
      */
-    const VERSION = '0.7.1';
+    const VERSION = '0.7.2';
 
     /** Instrumentation scope name reported on every exported signal. */
     const SCOPE_NAME = 'elven-observability-php-legacy';
