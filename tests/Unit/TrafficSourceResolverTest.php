@@ -318,4 +318,21 @@ final class TrafficSourceResolverTest extends TestCase
             $redactor->redactMetricLabels(array('traffic_source' => 'fonte-inventada', 'traffic_channel' => 'canal-inventado'), $allowed)
         );
     }
+
+    /**
+     * The vocabulary growth must not reorder detection: a social/organic
+     * utm_source used to normalize to `other` (fallback) and lose to
+     * skyScannerCode, gclid, the referer and X-Traffic-Source.
+     */
+    public function testWeakSourcesKeepTheOldFallbackPrecedence(): void
+    {
+        self::assertSame('skyscanner', TrafficSourceResolver::attributesFromRequest(array('utm_source' => 'instagram', 'skyScannerCode' => 'x'))['traffic_source']);
+        self::assertSame('google', TrafficSourceResolver::attributesFromRequest(array('utm_source' => 'facebook'), array('QUERY_STRING' => 'gclid=x'))['traffic_source']);
+        self::assertSame('kayak', TrafficSourceResolver::attributesFromRequest(array('utm_source' => 'bing'), array('HTTP_REFERER' => 'https://www.kayak.com.br/x'))['traffic_source']);
+        self::assertSame('skyscanner', TrafficSourceResolver::attributesFromRequest(array('source' => 'facebook'), array('HTTP_X_TRAFFIC_SOURCE' => 'skyscanner'))['traffic_source']);
+        // no stronger signal: the weak name is kept (the point of the vocabulary change)
+        self::assertSame(array('traffic_source' => 'instagram', 'traffic_channel' => 'paid'), TrafficSourceResolver::attributesFromRequest(array('utm_source' => 'instagram', 'utm_medium' => 'cpc')));
+        // weak beats other, first weak wins
+        self::assertSame('facebook', TrafficSourceResolver::attributesFromRequest(array('utm_source' => 'facebook'), array('HTTP_X_TRAFFIC_SOURCE' => 'twitter'))['traffic_source']);
+    }
 }
