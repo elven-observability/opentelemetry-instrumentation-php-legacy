@@ -226,12 +226,20 @@ final class TrafficSourceResolver
         $fallback = null;
         foreach (self::sourceCandidates($request, $server) as $candidate) {
             $source = self::normalizeSource($candidate);
-            if ($source !== 'unknown' && $source !== 'other') {
-                return $source;
+            if ($source === 'unknown') {
+                continue;
             }
-            if ($source === 'other') {
-                $fallback = 'other';
+            // Social, organic and referral names only became first-class labels so
+            // they stop collapsing to `other`; they must NOT start beating the
+            // signals that used to win over them (skyScannerCode, gclid, referer,
+            // X-Traffic-Source). They keep the old `other` precedence: fallback.
+            if ($source === 'other' || self::isWeakSource($source)) {
+                if ($fallback === null || $fallback === 'other') {
+                    $fallback = $source;
+                }
+                continue;
             }
+            return $source;
         }
         $hasSkyscannerCode = self::value($request, array(
             'skyScannerCode',
@@ -282,6 +290,20 @@ final class TrafficSourceResolver
 
         $channel = self::normalizeChannel($explicit);
         return $channel !== 'unknown' ? $channel : self::channelForSource($source);
+    }
+
+    /**
+     * Sources that only name where a visitor came from (social network, organic
+     * search, referral) and never outrank a partner/paid signal in detection.
+     *
+     * @param string $source normalized
+     * @return bool
+     */
+    public static function isWeakSource($source)
+    {
+        return $source === 'referral'
+            || in_array($source, self::$socialSources, true)
+            || in_array($source, self::$organicSources, true);
     }
 
     private static function channelForSource($source)
