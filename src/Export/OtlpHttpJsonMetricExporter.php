@@ -13,11 +13,11 @@ final class OtlpHttpJsonMetricExporter
     private $client;
     private $aggregationTemporality;
 
-    public function __construct(ObservabilityConfig $config, array $resource)
+    public function __construct(ObservabilityConfig $config, array $resource, ?ExportBudget $budget = null)
     {
         $this->endpoint = $config->metricsEndpoint();
         $this->resource = $resource;
-        $this->client = new HttpJsonClient($config->headers(), $config->timeoutMillis());
+        $this->client = new HttpJsonClient($config->headers(), $config->timeoutMillis(), null, $budget);
         $this->aggregationTemporality = $config->metricsTemporality() === 'delta'
             ? 'AGGREGATION_TEMPORALITY_DELTA'
             : 'AGGREGATION_TEMPORALITY_CUMULATIVE';

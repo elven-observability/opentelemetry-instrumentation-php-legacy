@@ -1,6 +1,6 @@
 <?php
 
-require __DIR__ . '/../../../var/compat-php74-guzzle6-monolog2-vendor/autoload.php';
+require __DIR__ . '/../../../var/compat-php74-guzzle7-monolog2-vendor/autoload.php';
 
 use Elven\Observability\PhpLegacy\Instrumentation\GuzzleInstrumentation;
 use Elven\Observability\PhpLegacy\Logs\MonologOtlpHandler;
@@ -26,10 +26,10 @@ $stack = new HandlerStack(function ($request) use (&$capturedGuzzleRequest) {
 $stack->push(GuzzleInstrumentation::middleware(), 'elven.otel');
 $guzzle = new Client(array('handler' => $stack));
 $response = $guzzle->request('POST', 'https://dependency.example.test/events');
-selfAssert($response->getStatusCode() === 204, 'Guzzle 6 response was changed');
+selfAssert($response->getStatusCode() === 204, 'Guzzle 7 response was changed');
 selfAssert(
     preg_match('/^00-[a-f0-9]{32}-[a-f0-9]{16}-01$/', $capturedGuzzleRequest->getHeaderLine('traceparent')) === 1,
-    'Guzzle 6 traceparent was not injected'
+    'Guzzle 7 traceparent was not injected'
 );
 
 $processor = new MonologTraceProcessor();
@@ -47,7 +47,7 @@ $handler = new MonologOtlpHandler();
 selfAssert($handler instanceof MonologOtlpHandler, 'Monolog 2 OTLP handler could not be constructed');
 
 Observability::shutdown();
-fwrite(STDOUT, "PHP 7.4, Guzzle 6, and Monolog 2 compatibility passed.\n");
+fwrite(STDOUT, "PHP 7.4, Guzzle 7, and Monolog 2 compatibility passed.\n");
 
 function selfAssert($condition, $message)
 {

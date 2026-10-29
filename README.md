@@ -9,9 +9,9 @@ Export is synchronous at flush/shutdown, with one attempt per signal and no auto
 The file-backed circuit breaker skips telemetry on lock contention and does not follow HTTP redirects.
 Instrument caches retain at most 256 names per kind; overflow instruments are no-op. Use static metric names.
 
-Guzzle 6 is end-of-life and current Composer advisories block the pinned historical compatibility fixture.
-The fixture and its CI job deliberately retain Composer's security gate; a blocked install is not a passing compatibility test.
-Use a security-reviewed Guzzle 7 version compatible with your PHP runtime for new integrations; this package does not require Guzzle at runtime.
+Guzzle 6 is end-of-life and unsupported for security qualification. Its insecure dev/CI profile has been retired, not exempted from security checks.
+The development and PHP 7.4 compatibility profile now use security-reviewed Guzzle 7 (still compatible with PHP 7.3).
+Existing adapter methods remain API-compatible, but this library does not make a consuming application's Guzzle 6 safe or supported. Guzzle remains optional at runtime.
 
 Production-oriented traces, metrics, OTLP logs, and log correlation for PHP `>=7.3.13`, without PECL and without the official OpenTelemetry SDK.
 
@@ -42,7 +42,7 @@ Installing the Composer package and setting env vars alone does not intercept ca
 - Optional OTLP HTTP/JSON logs at `/v1/logs`, routed to Loki by the Collector.
 - W3C `traceparent`, bounded `tracestate`, and bounded `baggage` extraction/injection.
 - Exit-safe request scopes for legacy response helpers that call `exit` or `die`.
-- Guzzle 6/7 middleware and cURL/header helpers.
+- Guzzle 7 middleware and cURL/header helpers. Historical Guzzle 6 call shapes remain API-compatible but are unsupported for security qualification.
 - AWS SDK for PHP v3 middleware registered before SigV4 signing.
 - Manual wrappers for mysqli/PDO-style calls, MongoDB, Redis, Memcached, SOAP, AMQP, mail, AWS, and search.
 - Low-cardinality request, dependency, cache, job, exporter, and business metrics.
@@ -60,15 +60,14 @@ No PECL `opentelemetry` extension is required. No Elven token is required when t
 
 ## 1. Install
 
-```bash
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.6
-```
+The verified distribution method is the public Git/VCS repository. Public Packagist lookup returned HTTP 404 on 2026-10-29; this is not a target-network issue and consuming Git tags requires no Packagist token.
 
-If Packagist is not available in the target network, use the public GitHub repository:
+Installation from Git tag `v0.7.2` was verified, but that baseline contains the audit findings. The next candidate is `0.7.3` / `v0.7.3`, **not published by this audit**. Use only the immutable tag approved and published by the parent after independent review. The commands below are conditional on that approval/tag, not evidence it already exists:
 
 ```bash
-composer config repositories.elven-php-legacy vcs https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:^0.6
+composer config repositories.elven-php-legacy git https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy
+# Only after the parent approves and publishes the immutable v0.7.3 tag:
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:0.7.3
 ```
 
 The package keeps compatibility with applications that declare:
@@ -497,6 +496,13 @@ var_dump(getenv('OTEL_EXPORTER_OTLP_ENDPOINT'));
 If CLI sees env vars and HTTP does not, fix the PHP-FPM pool allowlist. If traces work but metrics do not, verify the signal-specific endpoint/protocol and Collector metrics pipeline. If OTLP logs are enabled but absent, verify the application actually calls `MonologOtlpHandler` or `logs()->emit()`.
 
 Collector failure never throws into the application. Export timeout is bounded to 30 seconds, defaults to 200ms, and endpoint plus Collector-origin circuit breakers suppress repeated failures across PHP-FPM requests and workers. Their bounded state contains no telemetry and lives in the effective runtime user's private temporary directory; keep `sys_get_temp_dir()` writable.
+
+The timeout is shared by all signals in one flush/shutdown, rather than restarted per signal. Export remains synchronous; deadline checks are cooperative around bounded encoding and I/O, not a hard real-time CPU/RSS guarantee.
+
+- Span/log/metric queues share an 8MiB logical-data admission budget; a span/log record is capped at 64KiB. Failed batches remain bounded, and oversized/new records are dropped when the budget is full.
+- JSON encoding has a 4MiB output and 65536-node traversal ceiling. Serialized payload acceptance/transmission is also limited to 4MiB per flush. Count, depth and byte limits apply together; these numbers are not process RSS limits.
+- Request/response headers are capped at 16KiB and response bodies at 64KiB. Redirects remain disabled and TLS verification remains enabled. The legacy exporter makes one attempt per signal, with no network retry loop.
+- Without cURL, nonblocking sockets support literal IP/localhost endpoints and uncompressed responses, including bounded chunked framing. No potentially unbounded hostname lookup is attempted: use async-DNS-enabled cURL for hostname endpoints. Unsupported/ambiguous framing fails telemetry without changing application work.
 
 ## Documentation
 

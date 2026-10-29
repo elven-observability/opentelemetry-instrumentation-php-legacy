@@ -50,7 +50,7 @@ jobs:
       - name: Benchmark report
         run: composer bench
 
-  guzzle6:
+  guzzle7:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -63,8 +63,8 @@ jobs:
           coverage: none
           tools: composer:v2
 
-      - name: Install with Guzzle 6
-        run: composer require --dev guzzlehttp/guzzle:6.5.8 --with-all-dependencies --no-interaction --prefer-dist
+      - name: Install with secure Guzzle 7
+        run: composer require --dev guzzlehttp/guzzle:^7.16 --with-all-dependencies --no-interaction --prefer-dist
 
       - name: Run Guzzle and AWS middleware tests
         run: vendor/bin/phpunit tests/Unit/AdvancedInstrumentationTest.php

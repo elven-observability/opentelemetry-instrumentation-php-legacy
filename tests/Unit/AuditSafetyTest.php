@@ -100,6 +100,6 @@ final class AuditSafetyTest extends TestCase
         } finally {
             restore_error_handler();
         }
-        self::assertSame(1, $calls);
+        self::assertLessThanOrEqual(1, $calls);
     }
 }

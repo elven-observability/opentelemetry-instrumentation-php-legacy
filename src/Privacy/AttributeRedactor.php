@@ -5,6 +5,7 @@ namespace Elven\Observability\PhpLegacy\Privacy;
 use Elven\Observability\PhpLegacy\Attribution\TrafficSourceResolver;
 use Elven\Observability\PhpLegacy\Config\ObservabilityConfig;
 use Elven\Observability\PhpLegacy\Support\TelemetryValueLimiter;
+use Elven\Observability\PhpLegacy\Export\ExportBudget;
 
 final class AttributeRedactor
 {
@@ -31,6 +32,7 @@ final class AttributeRedactor
     private $allowRaw;
     private $captureDbStatement;
     private $redactDbStatement;
+    private $budget;
 
     /** @var array<string,int> key => PLAN_* cache */
     private $keyPlanCache = array();
@@ -41,6 +43,12 @@ final class AttributeRedactor
         $this->allowRaw = array_flip($config->allowRawAttributes());
         $this->captureDbStatement = $config->captureDbStatement();
         $this->redactDbStatement = $config->redactDbStatement();
+        $this->budget = new ExportBudget($config->timeoutMillis());
+    }
+
+    public function budget()
+    {
+        return $this->budget;
     }
 
     public function redactAttributes(array $attributes)

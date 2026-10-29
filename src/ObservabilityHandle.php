@@ -16,6 +16,7 @@ final class ObservabilityHandle
     private $logs;
     private $metrics;
     private $shutdown;
+    private $flushing = false;
 
     public function __construct(
         ObservabilityConfig $config,
@@ -34,6 +35,11 @@ final class ObservabilityHandle
 
     public function forceFlush()
     {
+        if ($this->flushing) {
+            return false;
+        }
+        $this->flushing = true;
+        $owner = $this->metrics->budget()->enter();
         try {
             $spansOk = $this->spanProcessor->forceFlush();
             $logsOk = $this->logs->forceFlush();
@@ -41,6 +47,9 @@ final class ObservabilityHandle
             return $spansOk && $logsOk && $metricsOk;
         } catch (\Throwable $e) {
             return false;
+        } finally {
+            $this->metrics->budget()->leave($owner);
+            $this->flushing = false;
         }
     }
 

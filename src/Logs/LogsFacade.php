@@ -9,6 +9,8 @@ use Elven\Observability\PhpLegacy\Privacy\AttributeRedactor;
 use Elven\Observability\PhpLegacy\Privacy\UrlSanitizer;
 use Elven\Observability\PhpLegacy\Support\Clock;
 use Elven\Observability\PhpLegacy\Support\TelemetryValueLimiter;
+use Elven\Observability\PhpLegacy\Export\ExportBudget;
+use Elven\Observability\PhpLegacy\Export\LimitedJson;
 
 final class LogsFacade
 {
@@ -29,6 +31,8 @@ final class LogsFacade
     private $maxRecords;
     private $records;
     private $droppedRecords;
+    private $budget;
+    private $queuedBytes = 0;
 
     public function __construct(
         ObservabilityConfig $config,
@@ -47,6 +51,7 @@ final class LogsFacade
         $this->maxRecords = (int) $maxRecords > 0 ? (int) $maxRecords : 512;
         $this->records = array();
         $this->droppedRecords = 0;
+        $this->budget = $redactor ? $redactor->budget() : new ExportBudget($config->timeoutMillis());
     }
 
     public function correlate(array $context)
@@ -109,6 +114,13 @@ final class LogsFacade
                 $record['flags'] = $spanContext->traceFlags() === '01' ? 1 : 0;
             }
 
+            $encoded = LimitedJson::encode($record, ExportBudget::RECORD_BYTES);
+            $bytes = $encoded === null ? ExportBudget::RECORD_BYTES + 1 : strlen($encoded) + 1024;
+            if ($encoded === null || !$this->budget->reserve($bytes)) {
+                $this->droppedRecords++;
+                return false;
+            }
+            $this->queuedBytes += $bytes;
             $this->records[] = $record;
             return true;
         } catch (\Throwable $e) {
@@ -141,6 +153,8 @@ final class LogsFacade
     public function forceFlush()
     {
         if (!$this->exporter) {
+            $this->budget->release($this->queuedBytes);
+            $this->queuedBytes = 0;
             $this->records = array();
             $this->droppedRecords = 0;
             return true;
@@ -153,6 +167,8 @@ final class LogsFacade
             }
             $ok = $this->exporter->export($this->records);
             if ($ok) {
+                $this->budget->release($this->queuedBytes);
+                $this->queuedBytes = 0;
                 $this->records = array();
             } else {
                 $this->recordFailedExportMetric();

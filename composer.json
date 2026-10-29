@@ -28,7 +28,7 @@
     "ext-json": "*"
   },
   "require-dev": {
-    "guzzlehttp/guzzle": "^6.5.8 || ^7.5",
+    "guzzlehttp/guzzle": "^7.16",
     "monolog/monolog": "^1.27 || ^2.9",
     "phpstan/phpstan": "^1.10",
     "phpunit/phpunit": "^9.6",
@@ -66,8 +66,8 @@
     "test:unit": "phpunit --testsuite unit",
     "test:integration": "phpunit --testsuite integration",
     "test:compat:php74-legacy": [
-      "composer update --working-dir=tests/Compatibility/php74-guzzle6-monolog2 --no-interaction --prefer-dist",
-      "@php tests/Compatibility/php74-guzzle6-monolog2/verify.php"
+      "composer update --working-dir=tests/Compatibility/php74-guzzle7-monolog2 --no-interaction --prefer-dist",
+      "@php tests/Compatibility/php74-guzzle7-monolog2/verify.php"
     ],
     "bench": "php benchmarks/run.php",
     "collector:fake": "php examples/fake-collector/server.php",
