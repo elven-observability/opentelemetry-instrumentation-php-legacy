@@ -37,6 +37,7 @@ while ($socket = @stream_socket_accept($server, 10)) {
         }
     }
     file_put_contents($store, "request\n", FILE_APPEND);
+    file_put_contents($store . '.headers', $request, FILE_APPEND);
     if ($mode === 'stall') {
         usleep(2000000);
     } elseif ($mode === 'drip-header' || $mode === 'drip-body') {
@@ -59,6 +60,10 @@ while ($socket = @stream_socket_accept($server, 10)) {
             : ($mode === 'chunked' ? "Transfer-Encoding: chunked" : "Connection: close");
         @fwrite($socket, "HTTP/1.1 200 OK\r\n" . $framing . "\r\n\r\n"
             . ($mode === 'chunked' ? "100000\r\n" : '') . str_repeat('x', 1048576));
+    } elseif ($mode === 'duplicates') {
+        @fwrite($socket, "HTTP/1.1 200 OK\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Length: 2\r\n\r\n{}");
+    } elseif ($mode === 'duplicate-framing') {
+        @fwrite($socket, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 8\r\n\r\n{}");
     } elseif ($mode === 'healthy-chunked') {
         @fwrite($socket, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n");
     } elseif ($mode === 'retry-long' || $mode === 'retry-zero') {

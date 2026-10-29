@@ -7,6 +7,16 @@ use RuntimeException;
 /** One non-redirecting HTTP exchange, with bounded input, response and elapsed time. */
 final class BoundedHttpExchange
 {
+    /** @var bool */
+    private $strictResolver;
+
+    public function __construct(?bool $strictResolver = null)
+    {
+        $this->strictResolver = $strictResolver === null
+            ? filter_var(getenv('ELVEN_OTEL_STRICT_RESOLVER') ?: 'false', FILTER_VALIDATE_BOOL)
+            : $strictResolver;
+    }
+
     /**
      * @param array<string, string> $headers
      * @return array{ok: bool, status: int, headers: array<string, string>, body: string}
@@ -17,10 +27,18 @@ final class BoundedHttpExchange
         if (
             !is_array($parts) || !isset($parts['host'], $parts['scheme'])
             || !in_array(strtolower($parts['scheme']), array('http', 'https'), true)
-            || isset($parts['user']) || isset($parts['pass']) || strlen($url) > 8192
+            || strlen($url) > 8192
             || strlen($payload) > ExportBudget::WIRE_BYTES || $timeoutMillis < 1
         ) {
             throw new RuntimeException('Invalid or oversized OTLP request');
+        }
+        if (isset($parts['user'])) {
+            if (!in_array('authorization', array_map('strtolower', array_keys($headers)), true)) {
+                $headers['Authorization'] = 'Basic ' . base64_encode(rawurldecode($parts['user']) . ':'
+                    . rawurldecode(isset($parts['pass']) ? $parts['pass'] : ''));
+            }
+            $url = $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '')
+                . (isset($parts['path']) ? $parts['path'] : '/') . (isset($parts['query']) ? '?' . $parts['query'] : '');
         }
         $lines = array('Accept-Encoding: identity', 'Connection: close', 'Expect:');
         $requestHeaderBytes = 64;
@@ -56,8 +74,13 @@ final class BoundedHttpExchange
     private function curl(string $url, string $payload, array $lines, int $timeout, string $host): array
     {
         $version = curl_version();
-        if (!filter_var($host, FILTER_VALIDATE_IP) && !($version['features'] & CURL_VERSION_ASYNCHDNS)) {
-            throw new RuntimeException('Bounded DNS requires an asynchronous cURL resolver');
+        if ($this->strictResolver && !($version['features'] & CURL_VERSION_ASYNCHDNS)) {
+            $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+            $port = parse_url($url, PHP_URL_PORT) ?: ($scheme === 'https' ? 443 : 80);
+            $proxy = $this->proxy($scheme, $host, $port);
+            if (!filter_var($host, FILTER_VALIDATE_IP) || $proxy !== null && !filter_var($proxy['host'], FILTER_VALIDATE_IP)) {
+                throw new RuntimeException('Bounded DNS requires an asynchronous cURL resolver');
+            }
         }
         $curl = curl_init($url);
         if ($curl === false) {
@@ -67,6 +90,17 @@ final class BoundedHttpExchange
         $headerBytes = 0;
         $body = '';
         try {
+            if (defined('CURLOPT_HEADEROPT') && defined('CURLHEADER_SEPARATE')) {
+                curl_setopt($curl, CURLOPT_HEADEROPT, CURLHEADER_SEPARATE);
+            }
+            // libcurl intentionally ignores uppercase HTTP_PROXY. Preserve the
+            // established CLI contract without trusting CGI's HTTP header env.
+            if (
+                PHP_SAPI === 'cli' && getenv('REQUEST_METHOD') === false && !getenv('http_proxy')
+                && strtolower((string) parse_url($url, PHP_URL_SCHEME)) === 'http' && getenv('HTTP_PROXY')
+            ) {
+                curl_setopt($curl, CURLOPT_PROXY, getenv('HTTP_PROXY'));
+            }
             curl_setopt_array($curl, array(
                 CURLOPT_POST => true,
                 CURLOPT_POSTFIELDS => $payload,
@@ -82,6 +116,9 @@ final class BoundedHttpExchange
                     $headerBytes += strlen($line);
                     if ($headerBytes > ExportBudget::HEADER_BYTES) {
                         return 0;
+                    }
+                    if (strncmp($line, 'HTTP/', 5) === 0) {
+                        $headers = array();
                     }
                     $this->header($line, $headers);
                     return strlen($line);
@@ -107,8 +144,8 @@ final class BoundedHttpExchange
     }
 
     /**
-     * No DNS or blocking HTTP wrapper here. Unbounded hostname resolution is
-     * deliberately unavailable without cURL's asynchronous resolver.
+     * Compatibility mode keeps OS hostname resolution. Strict mode refuses it:
+     * synchronous DNS cannot be preempted by the subsequent socket deadline.
      *
      * @param array<string, mixed> $parts
      * @param list<string> $lines
@@ -118,23 +155,29 @@ final class BoundedHttpExchange
     {
         $host = trim($parts['host'], '[]');
         $address = strtolower($host) === 'localhost' ? '127.0.0.1' : $host;
-        if (!filter_var($address, FILTER_VALIDATE_IP)) {
+        if ($this->strictResolver && !filter_var($address, FILTER_VALIDATE_IP)) {
             throw new RuntimeException('Stream OTLP requires a literal IP or localhost; install cURL for DNS');
         }
         $tls = strtolower($parts['scheme']) === 'https';
         $port = isset($parts['port']) ? $parts['port'] : ($tls ? 443 : 80);
-        $authority = strpos($address, ':') !== false ? '[' . $address . ']' : $address;
+        $proxy = $this->proxy($tls ? 'https' : 'http', $host, $port);
+        $connectHost = $proxy !== null ? $proxy['host'] : $address;
+        if ($this->strictResolver && !filter_var($connectHost, FILTER_VALIDATE_IP)) {
+            throw new RuntimeException('Strict OTLP resolver requires a literal proxy IP');
+        }
+        $authority = strpos($connectHost, ':') !== false ? '[' . trim($connectHost, '[]') . ']' : $connectHost;
+        $connectPort = $proxy !== null ? $proxy['port'] : $port;
         $deadline = ExportBudget::now() + $timeout / 1000;
         $context = stream_context_create(array('ssl' => array(
             'verify_peer' => true, 'verify_peer_name' => true, 'allow_self_signed' => false,
             'peer_name' => $host, 'SNI_enabled' => true, 'disable_compression' => true,
         )));
         $socket = @stream_socket_client(
-            'tcp://' . $authority . ':' . $port,
+            'tcp://' . $authority . ':' . $connectPort,
             $errno,
             $error,
             $timeout / 1000,
-            STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT,
+            $this->strictResolver ? STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT : STREAM_CLIENT_CONNECT,
             $context
         );
         if ($socket === false) {
@@ -145,6 +188,21 @@ final class BoundedHttpExchange
             $this->wait($socket, $deadline, true);
             if (@stream_socket_get_name($socket, true) === false) {
                 throw new RuntimeException('OTLP connection failed');
+            }
+            $hostHeader = strpos($host, ':') !== false ? '[' . $host . ']' : $host;
+            if ($proxy !== null && $tls) {
+                $this->write($socket, 'CONNECT ' . $hostHeader . ':' . $port . " HTTP/1.1\r\nHost: "
+                    . $hostHeader . ':' . $port . "\r\n" . $proxy['auth'] . "\r\n", $deadline);
+                $tunnel = '';
+                while (strpos($tunnel, "\r\n\r\n") === false) {
+                    if (strlen($tunnel) > ExportBudget::HEADER_BYTES) {
+                        throw new RuntimeException('OTLP proxy response exceeds budget');
+                    }
+                    $tunnel .= $this->read($socket, $deadline);
+                }
+                if (strlen($tunnel) > ExportBudget::HEADER_BYTES || !preg_match('#^HTTP/1\\.[01] 200(?: |\r)#', $tunnel)) {
+                    throw new RuntimeException('OTLP proxy tunnel failed');
+                }
             }
             if ($tls) {
                 $method = STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT;
@@ -169,9 +227,12 @@ final class BoundedHttpExchange
             if (preg_match('/[\\x00-\\x20\\x7f]/', $target)) {
                 throw new RuntimeException('Invalid OTLP request target');
             }
-            $hostHeader = strpos($host, ':') !== false ? '[' . $host . ']' : $host;
+            if ($proxy !== null && !$tls) {
+                $target = 'http://' . $hostHeader . ':' . $port . $target;
+            }
             $request = 'POST ' . $target . " HTTP/1.1\r\nHost: " . $hostHeader . ':' . $port
-                . "\r\nContent-Length: " . strlen($payload) . "\r\n" . implode("\r\n", $lines) . "\r\n\r\n";
+                . "\r\nContent-Length: " . strlen($payload) . "\r\n" . implode("\r\n", $lines) . "\r\n"
+                . ($proxy !== null && !$tls ? $proxy['auth'] : '') . "\r\n";
             $this->write($socket, $request, $deadline);
             $this->write($socket, $payload, $deadline);
             $buffer = '';
@@ -295,11 +356,46 @@ final class BoundedHttpExchange
         $colon = strpos($line, ':');
         if ($colon !== false) {
             $name = strtolower(substr($line, 0, $colon));
+            if (!in_array($name, array('content-length', 'transfer-encoding', 'content-encoding', 'retry-after'), true)) {
+                return;
+            }
             if (isset($headers[$name])) {
                 throw new RuntimeException('Duplicate OTLP response header');
             }
             $headers[$name] = trim(substr($line, $colon + 1));
         }
+    }
+
+    /** @return array{host: string, port: int, auth: string}|null */
+    private function proxy(string $scheme, string $host, int $port): ?array
+    {
+        $value = getenv($scheme . '_proxy');
+        if (!$value && ($scheme === 'https' || PHP_SAPI === 'cli' && getenv('REQUEST_METHOD') === false)) {
+            $value = getenv(strtoupper($scheme) . '_PROXY');
+        }
+        $value = $value ?: (getenv('all_proxy') ?: getenv('ALL_PROXY'));
+        if (!$value) {
+            return null;
+        }
+        foreach (explode(',', getenv('no_proxy') ?: (getenv('NO_PROXY') ?: '')) as $excluded) {
+            $excluded = strtolower(trim($excluded));
+            if ($excluded === '*') {
+                return null;
+            }
+            if (
+                $excluded !== '' && ($excluded === strtolower($host) . ':' . $port
+                || $excluded === strtolower($host) || substr(strtolower($host), -strlen('.' . ltrim($excluded, '.'))) === '.' . ltrim($excluded, '.'))
+            ) {
+                return null;
+            }
+        }
+        $parts = parse_url(strpos($value, '://') === false ? 'http://' . $value : $value);
+        if (!is_array($parts) || !isset($parts['host']) || strtolower($parts['scheme']) !== 'http' || strlen($value) > 8192) {
+            throw new RuntimeException('Unsupported stream proxy; use cURL for this proxy profile');
+        }
+        return array('host' => trim($parts['host'], '[]'), 'port' => isset($parts['port']) ? $parts['port'] : 80,
+            'auth' => isset($parts['user']) ? 'Proxy-Authorization: Basic '
+                . base64_encode(rawurldecode($parts['user']) . ':' . rawurldecode(isset($parts['pass']) ? $parts['pass'] : '')) . "\r\n" : '');
     }
 
     /** @param resource $socket */

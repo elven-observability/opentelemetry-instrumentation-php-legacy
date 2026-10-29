@@ -21,7 +21,7 @@ final class ExportBoundsTest extends TestCase
             proc_terminate($this->process);
             proc_close($this->process);
         }
-        foreach (array($this->store, $this->store . '.ready', $this->certificate) as $file) {
+        foreach (array($this->store, $this->store . '.ready', $this->store . '.headers', $this->certificate) as $file) {
             if ($file && is_file($file)) {
                 unlink($file);
             }
@@ -134,6 +134,86 @@ final class ExportBoundsTest extends TestCase
         self::assertLessThanOrEqual(ExportBudget::QUEUE_BYTES, $budget->queuedBytes());
         $handle->shutdown();
         Observability::resetForTests();
+    }
+
+
+    public function testRepeatedNonFramingHeadersAndCredentialedHostname(): void
+    {
+        $url = $this->start('duplicates');
+        $url = str_replace('127.0.0.1', 'synthetic:password@localhost.', $url);
+        foreach (array(false, true) as $stream) {
+            $response = (new BoundedHttpExchange(false))->post($url, '{}', array(), 500, $stream);
+            self::assertTrue($response['ok']);
+        }
+        self::assertStringContainsString('Authorization: Basic ' . base64_encode('synthetic:password'), file_get_contents($this->store . '.headers'));
+    }
+
+    public function testStrictResolverRestrictionIsOptIn(): void
+    {
+        $url = str_replace('127.0.0.1', 'localhost.', $this->start('healthy'));
+        self::assertTrue((new BoundedHttpExchange(false))->post($url, '{}', array(), 500, true)['ok']);
+        $this->expectException(\RuntimeException::class);
+        (new BoundedHttpExchange(true))->post($url, '{}', array(), 500, true);
+    }
+
+    public function testConflictingResponseFramingStillFails(): void
+    {
+        $url = $this->start('duplicate-framing');
+        foreach (array(false, true) as $stream) {
+            $ok = false;
+            try {
+                $ok = (new BoundedHttpExchange())->post($url, '{}', array(), 500, $stream)['ok'];
+            } catch (\Throwable $ignored) {
+            }
+            self::assertFalse($ok);
+        }
+    }
+
+    public function testExplicitCliProxyIsNotBypassedAndHttpoxyIsIgnored(): void
+    {
+        $url = $this->start('healthy');
+        $proxy = 'http://127.0.0.1:' . $this->port;
+        $keys = array('http_proxy', 'HTTP_PROXY', 'no_proxy', 'NO_PROXY', 'all_proxy', 'ALL_PROXY', 'REQUEST_METHOD');
+        $old = array();
+        foreach ($keys as $key) {
+            $old[$key] = getenv($key);
+            putenv($key);
+        }
+        try {
+            putenv('HTTP_PROXY=' . $proxy);
+            foreach (array(false, true) as $stream) {
+                self::assertTrue((new BoundedHttpExchange())->post('http://127.0.0.1:1/v1/traces', '{}', array(), 500, $stream)['ok']);
+            }
+            self::assertSame(2, substr_count(file_get_contents($this->store), 'request'));
+            self::assertStringContainsString('POST http://127.0.0.1:1/v1/traces HTTP/1.1', file_get_contents($this->store . '.headers'));
+            putenv('HTTP_PROXY=http://127.0.0.1:1');
+            foreach (array(false, true) as $stream) {
+                $ok = false;
+                try {
+                    $ok = (new BoundedHttpExchange())->post($url, '{}', array(), 50, $stream)['ok'];
+                } catch (\Throwable $ignored) {
+                }
+                self::assertFalse($ok);
+            }
+            putenv('HTTP_PROXY=' . $proxy);
+            foreach (array('REQUEST_METHOD=GET', 'NO_PROXY=127.0.0.1') as $setting) {
+                putenv($setting);
+                foreach (array(false, true) as $stream) {
+                    $ok = false;
+                    try {
+                        $ok = (new BoundedHttpExchange())->post('http://127.0.0.1:1/v1/traces', '{}', array(), 50, $stream)['ok'];
+                    } catch (\Throwable $ignored) {
+                    }
+                    self::assertFalse($ok);
+                }
+                putenv($setting === 'REQUEST_METHOD=GET' ? 'REQUEST_METHOD' : 'NO_PROXY');
+            }
+            self::assertSame(2, substr_count(file_get_contents($this->store), 'request'));
+        } finally {
+            foreach ($old as $key => $value) {
+                putenv($value === false ? $key : $key . '=' . $value);
+            }
+        }
     }
 
     public function testHealthyChunkedResponseWorksWithoutCurl(): void

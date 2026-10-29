@@ -4,7 +4,8 @@
 
 - Preserve PHP >=7.3.13 and runtime adapter APIs; retire only the insecure Guzzle 6 dev/CI profile in favor of compatible Guzzle 7.
 - Bound the shared flush/shutdown deadline, queue admission and JSON traversal/output; bound headers/bodies in cURL and a nonblocking, TLS-verifying socket fallback.
-- Decline telemetry on contended circuit locks, unsupported stream DNS/framing or exhausted budgets; never weaken redaction/TLS for tests.
+- Restore compatible DNS, endpoint Basic auth and CLI proxy egress; strict resolver refusal is opt-in. Default synchronous OS DNS cannot have a hard deadline. TLS/redirect protections remain enabled.
+- Fix valid repeated headers and retained-size attribute/status replacement accounting; add independent-review regressions. Decline telemetry on contended locks, unsupported framing/proxy profiles or exhausted budgets, never silently bypass required proxy egress.
 - Fix scalar-array privacy and cache retention, honor OTEL_SDK_DISABLED, and add adversarial collector/queue tests.
 - VCS is the verified distribution method. Candidate v0.7.3 is not published and requires parent independent review and immutable-tag approval.
 

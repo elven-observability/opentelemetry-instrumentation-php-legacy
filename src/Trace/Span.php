@@ -37,6 +37,8 @@ final class Span
     private $droppedAttributesCount;
     private $droppedEventsCount;
     private $bytes = 1024;
+    private $attributeBytes = array();
+    private $statusBytes = 0;
 
     public function __construct(
         $name,
@@ -86,12 +88,14 @@ final class Span
         $limited = TelemetryValueLimiter::limit($value, $this->maxAttributeLength);
         $redacted = $this->redactor->redactValue($key, $limited);
         $safe = TelemetryValueLimiter::limit($redacted, $this->maxAttributeLength);
-        $encoded = LimitedJson::encode(array($key => $safe), ExportBudget::RECORD_BYTES - $this->bytes);
+        $previous = isset($this->attributeBytes[$key]) ? $this->attributeBytes[$key] : 0;
+        $encoded = LimitedJson::encode(array($key => $safe), ExportBudget::RECORD_BYTES - $this->bytes + $previous);
         if ($encoded === null) {
             $this->droppedAttributesCount++;
             return $this;
         }
-        $this->bytes += strlen($encoded);
+        $this->bytes += strlen($encoded) - $previous;
+        $this->attributeBytes[$key] = strlen($encoded);
         $this->attributes[$key] = $safe;
         return $this;
     }
@@ -173,9 +177,10 @@ final class Span
             $this->redactor->redactValue('status.message', $message),
             $this->maxAttributeLength
         );
-        $encoded = LimitedJson::encode($message, ExportBudget::RECORD_BYTES - $this->bytes);
+        $encoded = LimitedJson::encode($message, ExportBudget::RECORD_BYTES - $this->bytes + $this->statusBytes);
         if ($encoded !== null) {
-            $this->bytes += strlen($encoded);
+            $this->bytes += strlen($encoded) - $this->statusBytes;
+            $this->statusBytes = strlen($encoded);
             $this->statusMessage = $message;
         }
         return $this;

@@ -54,7 +54,7 @@ Installing the Composer package and setting env vars alone does not intercept ca
 - PHP `>=7.3.13` (tested on 7.3, 7.4, and PHP 8.x).
 - Composer and `ext-json`.
 - An OpenTelemetry Collector reachable from the PHP runtime.
-- Recommended: `ext-curl` for lower-overhead export.
+- Recommended: `ext-curl` for broader proxy support and asynchronous DNS builds.
 
 No PECL `opentelemetry` extension is required. No Elven token is required when the application sends to a customer-owned/local Collector; backend credentials remain in the Collector.
 
@@ -502,7 +502,8 @@ The timeout is shared by all signals in one flush/shutdown, rather than restarte
 - Span/log/metric queues share an 8MiB logical-data admission budget; a span/log record is capped at 64KiB. Failed batches remain bounded, and oversized/new records are dropped when the budget is full.
 - JSON encoding has a 4MiB output and 65536-node traversal ceiling. Serialized payload acceptance/transmission is also limited to 4MiB per flush. Count, depth and byte limits apply together; these numbers are not process RSS limits.
 - Request/response headers are capped at 16KiB and response bodies at 64KiB. Redirects remain disabled and TLS verification remains enabled. The legacy exporter makes one attempt per signal, with no network retry loop.
-- Without cURL, nonblocking sockets support literal IP/localhost endpoints and uncompressed responses, including bounded chunked framing. No potentially unbounded hostname lookup is attempted: use async-DNS-enabled cURL for hostname endpoints. Unsupported/ambiguous framing fails telemetry without changing application work.
+- The default compatibility profile accepts OS-resolved hostnames, endpoint Basic-auth userinfo and explicit headers. CLI `HTTP_PROXY` is honored; CGI/FPM uppercase `HTTP_PROXY` is ignored against httpoxy. Streams support HTTP proxies/HTTPS CONNECT and `NO_PROXY`; other proxy profiles require cURL and fail telemetry instead of silently sending directly. Redirects remain disabled and TLS verification remains enabled.
+- Compatibility mode cannot preempt synchronous OS DNS, so the socket/transfer timeout is not a hard DNS/whole-request guarantee. Explicit opt-in `ELVEN_OTEL_STRICT_RESOLVER=true` requires async-DNS cURL for hostname endpoints, or literal IP/localhost in streams. Strict resolution is not a silent default. Streams retain bounded uncompressed length/close/chunked framing; unsupported framing fails telemetry without changing application work.
 
 ## Documentation
 
