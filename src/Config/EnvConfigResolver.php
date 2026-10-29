@@ -46,6 +46,10 @@ final class EnvConfigResolver
         $enabledEnv = self::env('ELVEN_OTEL_ENABLED', null);
         $enabled = self::bool($explicit, 'enabled', $enabledEnv === null ? 'true' : $enabledEnv);
         $disabledReasons = array();
+        if (self::bool(array(), 'enabled', self::env('OTEL_SDK_DISABLED', 'false'))) {
+            $enabled = false;
+            $disabledReasons[] = 'OTEL_SDK_DISABLED=true';
+        }
         if ($enabledEnv !== null && !self::bool(array(), 'enabled', $enabledEnv)) {
             $enabled = false;
             $disabledReasons[] = 'ELVEN_OTEL_ENABLED=false';

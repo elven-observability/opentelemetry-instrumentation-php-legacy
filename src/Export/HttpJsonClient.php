@@ -12,6 +12,7 @@ final class HttpJsonClient
     private $timeoutMillis;
     private $circuitBreaker;
     private static $sharedCircuitBreakers = array();
+    private static $exporting = false;
 
     public function __construct(array $headers, $timeoutMillis, ?CircuitBreaker $circuitBreaker = null)
     {
@@ -22,6 +23,26 @@ final class HttpJsonClient
 
     public function post($url, array $payload)
     {
+        if (self::$exporting) {
+            return false;
+        }
+        self::$exporting = true;
+        try {
+            return $this->postOnce($url, $payload);
+        } finally {
+            self::$exporting = false;
+        }
+    }
+
+    private function postOnce($url, array $payload)
+    {
+        $parts = @parse_url((string) $url);
+        if (
+            !is_array($parts) || !isset($parts['host'])
+            || !in_array(strtolower(isset($parts['scheme']) ? $parts['scheme'] : ''), array('http', 'https'), true)
+        ) {
+            return false;
+        }
         $endpointCircuitBreaker = $this->circuitBreaker
             ?: self::sharedCircuitBreaker('endpoint:' . self::endpointKey($url));
         $originCircuitBreaker = $this->circuitBreaker
@@ -108,12 +129,13 @@ final class HttpJsonClient
     {
         $handle = curl_init($url);
         if (!$handle) {
-            return false;
+            return array('ok' => false, 'origin_failure' => true);
         }
         curl_setopt($handle, CURLOPT_POST, true);
         curl_setopt($handle, CURLOPT_POSTFIELDS, $json);
         curl_setopt($handle, CURLOPT_RETURNTRANSFER, false);
         curl_setopt($handle, CURLOPT_HEADER, false);
+        curl_setopt($handle, CURLOPT_FOLLOWLOCATION, false);
         curl_setopt($handle, CURLOPT_WRITEFUNCTION, function ($curl, $data) {
             return strlen($data);
         });
@@ -142,6 +164,8 @@ final class HttpJsonClient
                 'content' => $json,
                 'timeout' => max(0.001, $this->timeoutMillis / 1000),
                 'ignore_errors' => true,
+                'follow_location' => 0,
+                'max_redirects' => 0,
             ),
         ));
         $stream = @fopen($url, 'rb', false, $context);

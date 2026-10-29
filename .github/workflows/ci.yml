@@ -64,7 +64,7 @@ jobs:
           tools: composer:v2
 
       - name: Install with Guzzle 6
-        run: composer require --dev guzzlehttp/guzzle:6.5.8 --with-all-dependencies --no-interaction --prefer-dist --no-security-blocking
+        run: composer require --dev guzzlehttp/guzzle:6.5.8 --with-all-dependencies --no-interaction --prefer-dist
 
       - name: Run Guzzle and AWS middleware tests
         run: vendor/bin/phpunit tests/Unit/AdvancedInstrumentationTest.php

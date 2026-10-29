@@ -4,6 +4,7 @@ namespace Elven\Observability\PhpLegacy\Privacy;
 
 use Elven\Observability\PhpLegacy\Attribution\TrafficSourceResolver;
 use Elven\Observability\PhpLegacy\Config\ObservabilityConfig;
+use Elven\Observability\PhpLegacy\Support\TelemetryValueLimiter;
 
 final class AttributeRedactor
 {
@@ -70,9 +71,22 @@ final class AttributeRedactor
             return $value;
         }
         $key = (string) $key;
-        $plan = isset($this->keyPlanCache[$key])
-            ? $this->keyPlanCache[$key]
-            : ($this->keyPlanCache[$key] = $this->classifyKey($key));
+        if (isset($this->keyPlanCache[$key])) {
+            $plan = $this->keyPlanCache[$key];
+        } else {
+            $plan = $this->classifyKey($key);
+            if (strlen($key) <= 255 && count($this->keyPlanCache) < 512) {
+                $this->keyPlanCache[$key] = $plan;
+            }
+        }
+
+        if (is_array($value) && $plan !== self::PLAN_RAW && $plan !== self::PLAN_REDACT) {
+            $safe = array();
+            foreach (TelemetryValueLimiter::limit($value, 4096) as $itemKey => $item) {
+                $safe[$itemKey] = $this->redactValue(is_string($itemKey) ? $itemKey : $key, $item);
+            }
+            return $safe;
+        }
 
         switch ($plan) {
             case self::PLAN_RAW:

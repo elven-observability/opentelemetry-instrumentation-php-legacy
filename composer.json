@@ -66,7 +66,7 @@
     "test:unit": "phpunit --testsuite unit",
     "test:integration": "phpunit --testsuite integration",
     "test:compat:php74-legacy": [
-      "composer update --working-dir=tests/Compatibility/php74-guzzle6-monolog2 --no-interaction --prefer-dist --no-security-blocking",
+      "composer update --working-dir=tests/Compatibility/php74-guzzle6-monolog2 --no-interaction --prefer-dist",
       "@php tests/Compatibility/php74-guzzle6-monolog2/verify.php"
     ],
     "bench": "php benchmarks/run.php",

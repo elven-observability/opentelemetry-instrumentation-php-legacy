@@ -8,6 +8,7 @@ use Elven\Observability\PhpLegacy\Support\Clock;
 
 final class MetricFacade
 {
+    const MAX_INSTRUMENTS_PER_KIND = 256;
     private $exporter;
     private $redactor;
     private $defaultAttributes;
@@ -105,6 +106,9 @@ final class MetricFacade
     {
         $name = $this->normalizeMetricName($name);
         if (!isset($this->counters[$name])) {
+            if (count($this->counters) >= self::MAX_INSTRUMENTS_PER_KIND) {
+                return new Counter($this, '');
+            }
             $this->counters[$name] = new Counter($this, $name);
         }
         return $this->counters[$name];
@@ -114,6 +118,9 @@ final class MetricFacade
     {
         $name = $this->normalizeMetricName($name);
         if (!isset($this->histograms[$name])) {
+            if (count($this->histograms) >= self::MAX_INSTRUMENTS_PER_KIND) {
+                return new Histogram($this, '', $unit);
+            }
             $this->histograms[$name] = new Histogram($this, $name, $unit);
         }
         return $this->histograms[$name];
@@ -123,6 +130,9 @@ final class MetricFacade
     {
         $name = $this->normalizeMetricName($name);
         if (!isset($this->gauges[$name])) {
+            if (count($this->gauges) >= self::MAX_INSTRUMENTS_PER_KIND) {
+                return new Gauge($this, '');
+            }
             $this->gauges[$name] = new Gauge($this, $name);
         }
         return $this->gauges[$name];
@@ -151,7 +161,7 @@ final class MetricFacade
     public function recordCounter($name, $value, array $attributes = array())
     {
         $value = (float) $value;
-        if (!$this->enabled || $value < 0 || is_nan($value) || is_infinite($value)) {
+        if (!$this->enabled || $name === '' || $value < 0 || is_nan($value) || is_infinite($value)) {
             return;
         }
         $name = $this->normalizeMetricName($name);
@@ -169,7 +179,7 @@ final class MetricFacade
     public function recordHistogram($name, $value, array $attributes = array(), $unit = 'ms')
     {
         $value = (float) $value;
-        if (!$this->enabled || is_nan($value) || is_infinite($value)) {
+        if (!$this->enabled || $name === '' || is_nan($value) || is_infinite($value)) {
             return;
         }
         $name = $this->normalizeMetricName($name);
@@ -203,7 +213,7 @@ final class MetricFacade
     public function recordGauge($name, $value, array $attributes = array())
     {
         $value = (float) $value;
-        if (!$this->enabled || is_nan($value) || is_infinite($value)) {
+        if (!$this->enabled || $name === '' || is_nan($value) || is_infinite($value)) {
             return;
         }
         $name = $this->normalizeMetricName($name);

@@ -1,5 +1,18 @@
 # Elven OpenTelemetry Instrumentation for Legacy PHP
 
+Authoritative documentation: [docs.elven.works](https://docs.elven.works/).
+Documentation source and corrections: [elvenworks-ps/docs.elven.works](https://github.com/elvenworks-ps/docs.elven.works).
+
+The PHP 7.3.13+ core and manual helpers do not provide Laravel service-provider integration.
+Slim 2 helpers require explicit application wiring; runtime compatibility alone is not framework acceptance.
+Export is synchronous at flush/shutdown, with one attempt per signal and no automatic network retry loop.
+The file-backed circuit breaker skips telemetry on lock contention and does not follow HTTP redirects.
+Instrument caches retain at most 256 names per kind; overflow instruments are no-op. Use static metric names.
+
+Guzzle 6 is end-of-life and current Composer advisories block the pinned historical compatibility fixture.
+The fixture and its CI job deliberately retain Composer's security gate; a blocked install is not a passing compatibility test.
+Use a security-reviewed Guzzle 7 version compatible with your PHP runtime for new integrations; this package does not require Guzzle at runtime.
+
 Production-oriented traces, metrics, OTLP logs, and log correlation for PHP `>=7.3.13`, without PECL and without the official OpenTelemetry SDK.
 
 The library exports OTLP HTTP/JSON directly to an OpenTelemetry Collector, continues W3C trace context, and is designed so telemetry failures never change the application result.

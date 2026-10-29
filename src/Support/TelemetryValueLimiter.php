@@ -18,7 +18,7 @@ final class TelemetryValueLimiter
             $safe = array();
             $count = 0;
             $usedBytes = 0;
-            foreach ($value as $item) {
+            foreach ($value as $key => $item) {
                 if ($count >= $maxArrayItems) {
                     break;
                 }
@@ -33,7 +33,8 @@ final class TelemetryValueLimiter
                     } else {
                         $usedBytes += strlen((string) $item);
                     }
-                    $safe[] = $item;
+                    $key = is_string($key) ? substr($key, 0, 255) : $key;
+                    $safe[$key] = $item;
                     $count++;
                 }
             }
