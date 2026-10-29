@@ -25,7 +25,7 @@ final class Observability
      * version). Keep this in sync with the composer package version / git tag
      * as part of the release checklist.
      */
-    const VERSION = '0.7.2';
+    const VERSION = '0.8.0-rc.1';
 
     /** Instrumentation scope name reported on every exported signal. */
     const SCOPE_NAME = 'elven-observability-php-legacy';
@@ -74,7 +74,7 @@ final class Observability
             && strtolower($resolved->metricsExporter()) !== 'none'
             && $resolved->metricsProtocol() === 'http/json';
         if ($metricsEnabled) {
-            $metricExporter = new OtlpHttpJsonMetricExporter($resolved, $resource);
+            $metricExporter = new OtlpHttpJsonMetricExporter($resolved, $resource, $redactor->budget());
         }
         self::$metrics = new MetricFacade(
             $metricExporter,
@@ -89,14 +89,14 @@ final class Observability
             && strtolower($resolved->tracesExporter()) !== 'none'
             && $resolved->tracesProtocol() === 'http/json'
         ) {
-            $traceExporter = new OtlpHttpJsonTraceExporter($resolved, $resource);
+            $traceExporter = new OtlpHttpJsonTraceExporter($resolved, $resource, $redactor->budget());
         }
         if (
             $resolved->isEnabled()
             && strtolower($resolved->logsExporter()) !== 'none'
             && $resolved->logsProtocol() === 'http/json'
         ) {
-            $logExporter = new OtlpHttpJsonLogExporter($resolved, $resource);
+            $logExporter = new OtlpHttpJsonLogExporter($resolved, $resource, $redactor->budget());
         }
 
         $spanProcessor = new SpanProcessor($traceExporter, self::$metrics, $resolved->maxSpansPerRequest());

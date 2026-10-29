@@ -5,6 +5,8 @@ namespace Elven\Observability\PhpLegacy\Trace;
 use Elven\Observability\PhpLegacy\Privacy\AttributeRedactor;
 use Elven\Observability\PhpLegacy\Support\Clock;
 use Elven\Observability\PhpLegacy\Support\TelemetryValueLimiter;
+use Elven\Observability\PhpLegacy\Export\ExportBudget;
+use Elven\Observability\PhpLegacy\Export\LimitedJson;
 
 final class Span
 {
@@ -34,6 +36,9 @@ final class Span
     private $maxEventAttributes;
     private $droppedAttributesCount;
     private $droppedEventsCount;
+    private $bytes = 1024;
+    private $attributeBytes = array();
+    private $statusBytes = 0;
 
     public function __construct(
         $name,
@@ -82,7 +87,16 @@ final class Span
         }
         $limited = TelemetryValueLimiter::limit($value, $this->maxAttributeLength);
         $redacted = $this->redactor->redactValue($key, $limited);
-        $this->attributes[$key] = TelemetryValueLimiter::limit($redacted, $this->maxAttributeLength);
+        $safe = TelemetryValueLimiter::limit($redacted, $this->maxAttributeLength);
+        $previous = isset($this->attributeBytes[$key]) ? $this->attributeBytes[$key] : 0;
+        $encoded = LimitedJson::encode(array($key => $safe), ExportBudget::RECORD_BYTES - $this->bytes + $previous);
+        if ($encoded === null) {
+            $this->droppedAttributesCount++;
+            return $this;
+        }
+        $this->bytes += strlen($encoded) - $previous;
+        $this->attributeBytes[$key] = strlen($encoded);
+        $this->attributes[$key] = $safe;
         return $this;
     }
 
@@ -120,12 +134,19 @@ final class Span
             );
             $count++;
         }
-        $this->events[] = array(
+        $event = array(
             'name' => substr((string) $name, 0, 255),
             'timeUnixNano' => Clock::nowUnixNano(),
             'attributes' => $safeAttributes,
             'droppedAttributesCount' => max(0, count($attributes) - count($safeAttributes)),
         );
+        $encoded = LimitedJson::encode($event, ExportBudget::RECORD_BYTES - $this->bytes);
+        if ($encoded === null) {
+            $this->droppedEventsCount++;
+            return $this;
+        }
+        $this->bytes += strlen($encoded);
+        $this->events[] = $event;
         return $this;
     }
 
@@ -152,10 +173,16 @@ final class Span
             $code = 'UNSET';
         }
         $this->statusCode = $code;
-        $this->statusMessage = (string) TelemetryValueLimiter::limit(
+        $message = (string) TelemetryValueLimiter::limit(
             $this->redactor->redactValue('status.message', $message),
             $this->maxAttributeLength
         );
+        $encoded = LimitedJson::encode($message, ExportBudget::RECORD_BYTES - $this->bytes + $this->statusBytes);
+        if ($encoded !== null) {
+            $this->bytes += strlen($encoded) - $this->statusBytes;
+            $this->statusBytes = strlen($encoded);
+            $this->statusMessage = $message;
+        }
         return $this;
     }
 
@@ -242,6 +269,11 @@ final class Span
     public function droppedEventsCount()
     {
         return $this->droppedEventsCount;
+    }
+
+    public function estimatedBytes()
+    {
+        return $this->bytes;
     }
 
     private static function limit(array $limits, $key, $default)

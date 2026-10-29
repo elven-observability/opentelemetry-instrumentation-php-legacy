@@ -8,6 +8,7 @@ use Elven\Observability\PhpLegacy\Support\Clock;
 
 final class MetricFacade
 {
+    const MAX_INSTRUMENTS_PER_KIND = 256;
     private $exporter;
     private $redactor;
     private $defaultAttributes;
@@ -22,6 +23,7 @@ final class MetricFacade
     private $enabled;
     private $maxPoints;
     private $droppedMetricPoints;
+    private $queuedBytes = 0;
 
     private static $allowedLabels = array(
         'service_name',
@@ -105,15 +107,26 @@ final class MetricFacade
     {
         $name = $this->normalizeMetricName($name);
         if (!isset($this->counters[$name])) {
+            if (count($this->counters) >= self::MAX_INSTRUMENTS_PER_KIND) {
+                return new Counter($this, '');
+            }
             $this->counters[$name] = new Counter($this, $name);
         }
         return $this->counters[$name];
+    }
+
+    public function budget()
+    {
+        return $this->redactor->budget();
     }
 
     public function histogram($name, $unit = 'ms')
     {
         $name = $this->normalizeMetricName($name);
         if (!isset($this->histograms[$name])) {
+            if (count($this->histograms) >= self::MAX_INSTRUMENTS_PER_KIND) {
+                return new Histogram($this, '', $unit);
+            }
             $this->histograms[$name] = new Histogram($this, $name, $unit);
         }
         return $this->histograms[$name];
@@ -123,6 +136,9 @@ final class MetricFacade
     {
         $name = $this->normalizeMetricName($name);
         if (!isset($this->gauges[$name])) {
+            if (count($this->gauges) >= self::MAX_INSTRUMENTS_PER_KIND) {
+                return new Gauge($this, '');
+            }
             $this->gauges[$name] = new Gauge($this, $name);
         }
         return $this->gauges[$name];
@@ -151,25 +167,30 @@ final class MetricFacade
     public function recordCounter($name, $value, array $attributes = array())
     {
         $value = (float) $value;
-        if (!$this->enabled || $value < 0 || is_nan($value) || is_infinite($value)) {
+        if (!$this->enabled || $name === '' || $value < 0 || is_nan($value) || is_infinite($value)) {
             return;
         }
         $name = $this->normalizeMetricName($name);
         $key = $this->pointKey($name, $attributes);
-        if (!isset($this->counterData[$key]) && !$this->allowNewPoint()) {
+        if (!isset($this->counterData[$key]) && !$this->allowNewPoint($name, $attributes)) {
             return;
         }
         if (!isset($this->counterData[$key])) {
             $this->counterData[$key] = $this->point($name, 'counter', $attributes, 0.0);
         }
-        $this->counterData[$key]['value'] += $value;
+        $sum = $this->counterData[$key]['value'] + $value;
+        if (is_infinite($sum) || is_nan($sum)) {
+            return;
+        }
+        $this->counterData[$key]['value'] = $sum;
         $this->counterData[$key]['timeUnixNano'] = Clock::nowUnixNano();
     }
 
     public function recordHistogram($name, $value, array $attributes = array(), $unit = 'ms')
     {
+        $unit = substr((string) $unit, 0, 63);
         $value = (float) $value;
-        if (!$this->enabled || is_nan($value) || is_infinite($value)) {
+        if (!$this->enabled || $name === '' || is_nan($value) || is_infinite($value)) {
             return;
         }
         $name = $this->normalizeMetricName($name);
@@ -177,7 +198,7 @@ final class MetricFacade
         // need second-scaled boundaries; the default boundaries are millisecond-scaled.
         $bounds = $unit === 's' ? self::$secondsHistogramBounds : self::$defaultHistogramBounds;
         $key = $this->pointKey($name, $attributes);
-        if (!isset($this->histogramData[$key]) && !$this->allowNewPoint()) {
+        if (!isset($this->histogramData[$key]) && !$this->allowNewPoint($name, $attributes)) {
             return;
         }
         if (!isset($this->histogramData[$key])) {
@@ -203,12 +224,12 @@ final class MetricFacade
     public function recordGauge($name, $value, array $attributes = array())
     {
         $value = (float) $value;
-        if (!$this->enabled || is_nan($value) || is_infinite($value)) {
+        if (!$this->enabled || $name === '' || is_nan($value) || is_infinite($value)) {
             return;
         }
         $name = $this->normalizeMetricName($name);
         $key = $this->pointKey($name, $attributes);
-        if (!isset($this->gaugeData[$key]) && !$this->allowNewPoint()) {
+        if (!isset($this->gaugeData[$key]) && !$this->allowNewPoint($name, $attributes)) {
             return;
         }
         $this->gaugeData[$key] = $this->point($name, 'gauge', $attributes, $value);
@@ -299,18 +320,30 @@ final class MetricFacade
 
     private function clear()
     {
+        $this->budget()->release($this->queuedBytes);
+        $this->queuedBytes = 0;
         $this->counterData = array();
         $this->histogramData = array();
         $this->gaugeData = array();
         $this->startTimeUnixNano = Clock::nowUnixNano();
     }
 
-    private function allowNewPoint()
+    private function allowNewPoint($name, array $attributes)
     {
         if ($this->pointCount() >= $this->maxPoints) {
             $this->droppedMetricPoints++;
             return false;
         }
+        $safe = $this->redactor->redactMetricLabels(
+            array_merge($this->defaultAttributes, $this->requestAttributes, $attributes),
+            self::$allowedLabels
+        );
+        $bytes = 1024 + strlen($name) + strlen(json_encode($safe, JSON_INVALID_UTF8_SUBSTITUTE));
+        if (!$this->budget()->reserve($bytes)) {
+            $this->droppedMetricPoints++;
+            return false;
+        }
+        $this->queuedBytes += $bytes;
         return true;
     }
 
@@ -328,6 +361,10 @@ final class MetricFacade
         $attributes = array('operation' => 'metrics');
         $key = $this->pointKey('elven.php.exporter.dropped_metric_points', $attributes);
         if (!isset($this->counterData[$key])) {
+            if (!$this->budget()->reserve(1024)) {
+                return;
+            }
+            $this->queuedBytes += 1024;
             $this->counterData[$key] = $this->point('elven.php.exporter.dropped_metric_points', 'counter', $attributes, 0.0);
         }
         $this->counterData[$key]['value'] += $this->droppedMetricPoints;
@@ -347,7 +384,7 @@ final class MetricFacade
 
     private function normalizeMetricName($name)
     {
-        $name = preg_replace('/[^A-Za-z0-9_.-]/', '_', (string) $name);
+        $name = preg_replace('/[^A-Za-z0-9_.-]/', '_', substr((string) $name, 0, 255));
         $name = trim($name, '_.-');
         if ($name === '') {
             return 'elven.php.metric.invalid';

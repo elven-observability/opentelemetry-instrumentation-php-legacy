@@ -40,6 +40,7 @@ final class SpanProcessor
     private $maxSpans;
     private $spans;
     private $dropped;
+    private $queuedBytes = 0;
 
     /**
      * Span ids that a span in the buffer points at as its (local) parent.
@@ -83,15 +84,23 @@ final class SpanProcessor
     public function forceFlush()
     {
         if (!$this->exporter || count($this->spans) === 0) {
+            $this->metrics->budget()->release($this->queuedBytes);
+            $this->queuedBytes = 0;
             $this->spans = array();
             $this->bufferedParents = array();
             return true;
         }
 
         $spans = $this->spans;
+        $bytes = $this->queuedBytes;
+        $this->queuedBytes = 0;
         $this->spans = array();
         $this->bufferedParents = array();
-        $ok = $this->exporter->export($spans);
+        try {
+            $ok = $this->exporter->export($spans);
+        } finally {
+            $this->metrics->budget()->release($bytes);
+        }
         if (!$ok) {
             // With the reserve the buffer can hold max_spans + PARENT_RESERVE; the
             // retry keeps capacity(), because slicing to max_spans would cut the
@@ -112,6 +121,13 @@ final class SpanProcessor
 
     private function accept(Span $span)
     {
+        // Parent reserve slots never override the shared byte ceiling.
+        if (!$this->metrics->budget()->reserve($span->estimatedBytes())) {
+            $this->dropped++;
+            $this->metrics->counter('elven.php.exporter.dropped_spans')->add(1);
+            return;
+        }
+        $this->queuedBytes += $span->estimatedBytes();
         $this->spans[] = $span;
         $parent = $span->parentContext();
         if ($parent->isValid() && !$parent->isRemote()) {

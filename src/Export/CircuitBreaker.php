@@ -85,12 +85,13 @@ final class CircuitBreaker
 
         try {
             @chmod($this->stateFile, 0600);
-            if (!@flock($handle, LOCK_EX)) {
-                return $fallback;
+            if (!@flock($handle, LOCK_EX | LOCK_NB)) {
+                // A busy telemetry lock must never make the application wait.
+                return false;
             }
 
             rewind($handle);
-            $raw = stream_get_contents($handle);
+            $raw = stream_get_contents($handle, 1024);
             $decoded = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
             $state = array(
                 'failures' => is_array($decoded) && isset($decoded['failures'])

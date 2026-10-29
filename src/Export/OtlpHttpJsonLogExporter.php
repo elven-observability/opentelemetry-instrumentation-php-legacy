@@ -12,11 +12,11 @@ final class OtlpHttpJsonLogExporter
     private $resource;
     private $client;
 
-    public function __construct(ObservabilityConfig $config, array $resource)
+    public function __construct(ObservabilityConfig $config, array $resource, ?ExportBudget $budget = null)
     {
         $this->endpoint = $config->logsEndpoint();
         $this->resource = $resource;
-        $this->client = new HttpJsonClient($config->headers(), $config->timeoutMillis());
+        $this->client = new HttpJsonClient($config->headers(), $config->timeoutMillis(), null, $budget);
     }
 
     public function export(array $records)

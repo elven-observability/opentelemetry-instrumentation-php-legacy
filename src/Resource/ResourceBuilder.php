@@ -6,6 +6,7 @@ use Elven\Observability\PhpLegacy\Config\ObservabilityConfig;
 use Elven\Observability\PhpLegacy\Observability;
 use Elven\Observability\PhpLegacy\Privacy\AttributeRedactor;
 use Elven\Observability\PhpLegacy\Support\TelemetryValueLimiter;
+use Elven\Observability\PhpLegacy\Export\LimitedJson;
 
 final class ResourceBuilder
 {
@@ -40,7 +41,19 @@ final class ResourceBuilder
             $attributes['deployment.environment'] = $config->environment();
         }
 
-        return array_merge(self::safeCustomAttributes($config), $attributes);
+        $safe = array();
+        $bytes = 0;
+        $redactor = new AttributeRedactor($config);
+        foreach ($attributes + self::safeCustomAttributes($config) as $key => $value) {
+            $value = $redactor->redactValue($key, TelemetryValueLimiter::limit($value, 4096));
+            $encoded = LimitedJson::encode(array($key => $value), 16384 - $bytes);
+            if ($encoded === null) {
+                break;
+            }
+            $bytes += strlen($encoded);
+            $safe[$key] = $value;
+        }
+        return $safe;
     }
 
     public static function version()

@@ -12,7 +12,7 @@ final class Histogram
     {
         $this->facade = $facade;
         $this->name = (string) $name;
-        $this->unit = (string) $unit;
+        $this->unit = substr((string) $unit, 0, 63);
     }
 
     public function record($value, array $attributes = array())
