@@ -62,12 +62,12 @@ No PECL `opentelemetry` extension is required. No Elven token is required when t
 
 The verified distribution method is the public Git/VCS repository. Public Packagist lookup returned HTTP 404 on 2026-10-29; this is not a target-network issue and consuming Git tags requires no Packagist token.
 
-Installation from Git tag `v0.7.2` was verified, but that baseline contains the audit findings. The next candidate is `0.7.3` / `v0.7.3`, **not published by this audit**. Use only the immutable tag approved and published by the parent after independent review. The commands below are conditional on that approval/tag, not evidence it already exists:
+Installation from Git tag `v0.7.2` was verified, but that baseline contains the audit findings. The next candidate is the optional `0.8.0-rc.1` / `v0.8.0-rc.1`, **not published yet**. The new shared admission/transport policy is not a transparent `0.7.3` patch. Existing stable `^0.7` constraints do not select this new minor RC. Review [MIGRATION.md](MIGRATION.md) before opting in. These commands remain conditional on the reviewed immutable tag existing:
 
 ```bash
 composer config repositories.elven-php-legacy git https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy
-# Only after the parent approves and publishes the immutable v0.7.3 tag:
-composer require elven-observability/opentelemetry-instrumentation-php-legacy:0.7.3
+# Only after the reviewed immutable v0.8.0-rc.1 tag is published:
+composer require elven-observability/opentelemetry-instrumentation-php-legacy:0.8.0-rc.1
 ```
 
 The package keeps compatibility with applications that declare:
@@ -490,12 +490,14 @@ No telemetry:
 
 ```php
 var_dump(getenv('ELVEN_OTEL_ENABLED'));
-var_dump(getenv('OTEL_EXPORTER_OTLP_ENDPOINT'));
+var_dump((bool) getenv('OTEL_EXPORTER_OTLP_ENDPOINT'));
 ```
+
+Only print whether the endpoint is configured, not its value: endpoint userinfo can contain credentials. Do not dump the environment or OTLP headers.
 
 If CLI sees env vars and HTTP does not, fix the PHP-FPM pool allowlist. If traces work but metrics do not, verify the signal-specific endpoint/protocol and Collector metrics pipeline. If OTLP logs are enabled but absent, verify the application actually calls `MonologOtlpHandler` or `logs()->emit()`.
 
-Collector failure never throws into the application. Export timeout is bounded to 30 seconds, defaults to 200ms, and endpoint plus Collector-origin circuit breakers suppress repeated failures across PHP-FPM requests and workers. Their bounded state contains no telemetry and lives in the effective runtime user's private temporary directory; keep `sys_get_temp_dir()` writable.
+Built-in transports suppress handled Collector failures instead of throwing them into application work; this is not an OOM, arbitrary callback or process-wide failure guarantee. Export timeout is bounded to 30 seconds, defaults to 200ms, and endpoint plus Collector-origin circuit breakers suppress repeated failures across PHP-FPM requests and workers. Their bounded state contains no telemetry and lives in the effective runtime user's private temporary directory; keep `sys_get_temp_dir()` writable.
 
 The timeout is shared by all signals in one flush/shutdown, rather than restarted per signal. Export remains synchronous; deadline checks are cooperative around bounded encoding and I/O, not a hard real-time CPU/RSS guarantee.
 

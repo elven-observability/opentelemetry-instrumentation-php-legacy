@@ -1,13 +1,15 @@
 # Changelog
 
-## 0.7.3 - Unreleased Candidate
+## 0.8.0-rc.1 - Unreleased Optional Migration
+
+- Replace the planned `0.7.3` patch with a new pre-1.0 minor RC. Existing stable `^0.7` consumers are not moved to the shared admission/transport policy automatically. See MIGRATION.md; PHP/runtime compatibility does not imply unchanged telemetry under pressure.
 
 - Preserve PHP >=7.3.13 and runtime adapter APIs; retire only the insecure Guzzle 6 dev/CI profile in favor of compatible Guzzle 7.
 - Bound the shared flush/shutdown deadline, queue admission and JSON traversal/output; bound headers/bodies in cURL and a nonblocking, TLS-verifying socket fallback.
 - Restore compatible DNS, endpoint Basic auth and CLI proxy egress; strict resolver refusal is opt-in. Default synchronous OS DNS cannot have a hard deadline. TLS/redirect protections remain enabled.
 - Fix valid repeated headers and retained-size attribute/status replacement accounting; add independent-review regressions. Decline telemetry on contended locks, unsupported framing/proxy profiles or exhausted budgets, never silently bypass required proxy egress.
 - Fix scalar-array privacy and cache retention, honor OTEL_SDK_DISABLED, and add adversarial collector/queue tests.
-- VCS is the verified distribution method. Candidate v0.7.3 is not published and requires parent independent review and immutable-tag approval.
+- VCS is the verified distribution method. Candidate v0.8.0-rc.1 is not published and requires final qualification and immutable-tag approval.
 
 ## 0.7.2 - 2026-09-17
 
