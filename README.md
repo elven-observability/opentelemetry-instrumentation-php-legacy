@@ -62,11 +62,11 @@ No PECL `opentelemetry` extension is required. No Elven token is required when t
 
 The verified distribution method is the public Git/VCS repository. Public Packagist lookup returned HTTP 404 on 2026-10-29; this is not a target-network issue and consuming Git tags requires no Packagist token.
 
-Installation from Git tag `v0.7.2` was verified, but that baseline contains the audit findings. The next candidate is the optional `0.8.0-rc.1` / `v0.8.0-rc.1`, **not published yet**. The new shared admission/transport policy is not a transparent `0.7.3` patch. Existing stable `^0.7` constraints do not select this new minor RC. Review [MIGRATION.md](MIGRATION.md) before opting in. These commands remain conditional on the reviewed immutable tag existing:
+Installation from Git tag `v0.7.2` was verified, but that baseline contains the audit findings. The optional [0.8.0-rc.1 Git/VCS prerelease](https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy/releases/tag/v0.8.0-rc.1) is now published and checked through a fresh public-tag consumer. The release includes the source/CI/consumer receipt. The new shared admission/transport policy is not a transparent `0.7.3` patch. Existing stable `^0.7` constraints do not select this new minor RC. Review [MIGRATION.md](MIGRATION.md) before opting in:
 
 ```bash
 composer config repositories.elven-php-legacy git https://github.com/elven-observability/opentelemetry-instrumentation-php-legacy
-# Only after the reviewed immutable v0.8.0-rc.1 tag is published:
+# Explicit opt-in after reviewing the migration contract:
 composer require elven-observability/opentelemetry-instrumentation-php-legacy:0.8.0-rc.1
 ```
 
