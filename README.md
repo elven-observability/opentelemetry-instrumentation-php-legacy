@@ -56,6 +56,12 @@ Installing the Composer package and setting env vars alone does not intercept ca
 - An OpenTelemetry Collector reachable from the PHP runtime.
 - Recommended: `ext-curl` for broader proxy support and asynchronous DNS builds.
 
+### Runtime Security
+
+The minimum version is an API-compatibility claim, not security support for PHP 7.3/7.4 or other EOL branches. Before production adoption, use a supported PHP branch with the October 2026 runtime fixes: 8.2.35, 8.3.36, 8.4.27, 8.5.12 or later, or verify an equivalent maintained vendor backport. See the PHP project's [security notice](https://www.php.net/index.php) for critical RCE CVE-2026-109618 and CVE-2026-109619. Updating or disabling this Elven library does not patch PHP; an old PHP version number does not prove a vendor backport exists.
+
+Review the remaining conditional session-upload issue CVE-2026-115560 and Windows rebuilt packages for Brotli CVE-2026-111497 when applicable. No PHP memory/session configuration is changed by this library. The original PHP 8.5.10 CLI receipt proves only its scoped compatibility and decoded signal delivery, not web-runtime security. New runtime qualification is recorded separately, and `composer audit` does not cover the PHP engine or its native dependencies.
+
 No PECL `opentelemetry` extension is required. No Elven token is required when the application sends to a customer-owned/local Collector; backend credentials remain in the Collector.
 
 ## 1. Install
