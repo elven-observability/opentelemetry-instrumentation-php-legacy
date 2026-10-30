@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.0-rc.1 - Unreleased Optional Migration
+## 0.8.0-rc.1 - 2026-10-29 Optional Migration Prerelease
 
 - Replace the planned `0.7.3` patch with a new pre-1.0 minor RC. Existing stable `^0.7` consumers are not moved to the shared admission/transport policy automatically. See MIGRATION.md; PHP/runtime compatibility does not imply unchanged telemetry under pressure.
 
@@ -9,7 +9,7 @@
 - Restore compatible DNS, endpoint Basic auth and CLI proxy egress; strict resolver refusal is opt-in. Default synchronous OS DNS cannot have a hard deadline. TLS/redirect protections remain enabled.
 - Fix valid repeated headers and retained-size attribute/status replacement accounting; add independent-review regressions. Decline telemetry on contended locks, unsupported framing/proxy profiles or exhausted budgets, never silently bypass required proxy egress.
 - Fix scalar-array privacy and cache retention, honor OTEL_SDK_DISABLED, and add adversarial collector/queue tests.
-- VCS is the verified distribution method. Candidate v0.8.0-rc.1 is not published and requires final qualification and immutable-tag approval.
+- Git/VCS tag v0.8.0-rc.1 is published with exact source/CI/public-consumer receipts. No Packagist or customer deployment is inferred; optional migration and profile qualification still apply.
 
 ## 0.7.2 - 2026-09-17
 
